@@ -2,22 +2,35 @@
 
 PawLine is a minimal scaffold for an after-hours veterinary intake and escalation AI agent.
 
-This repository intentionally contains only the initial project skeleton. The AI agent, RAG layer, database, customer system, scheduling system, voice interface, and frontend are not yet implemented.
+This repository contains the initial implementation foundation for the after-hours veterinary intake flow. The customer lookup flow is implemented, while the AI agent, RAG layer, database, scheduling system, voice interface, and frontend remain future work.
 
 ## Local setup
 
 This project uses `uv` as the package manager and runner.
 
 ```bash
-cd /Users/andreapeterson/Documents/projects/pawline
+cd pawline
 uv sync --dev
 uv run pytest -q
-uv run uvicorn app.main:app --reload
+```
+
+## Full-stack local run
+
+Terminal 1: mock CRM service
+
+```bash
+MOCK_CRM_API_KEY=dev-crm-key uv run uvicorn mock_services.legacy_crm_api:app --reload --port 8001
+```
+
+Terminal 2: PawLine app
+
+```bash
+LEGACY_CRM_BASE_URL=http://127.0.0.1:8001 LEGACY_CRM_API_KEY=dev-crm-key uv run uvicorn app.main:app --reload --port 8000
 ```
 
 ## Health check
 
-Once the app is running:
+Once the PawLine app is running:
 
 ```bash
 curl http://127.0.0.1:8000/health
@@ -29,12 +42,14 @@ Expected response:
 {"status": "ok"}
 ```
 
-## Project status
+## Customer lookup check
 
-This scaffold provides the starting point for the PawLine service and includes a working health endpoint and test coverage for that endpoint.
+```bash
+curl "http://127.0.0.1:8000/customers/lookup?phone=3212222222"
+```
 
 ## Notes
 
 - Python 3.12+ is targeted for the project.
 - Dependencies are managed with `uv` instead of `pip`.
-- No AI agent, database, scheduling system, or frontend logic is included yet.
+- The mock CRM is intentionally separate from the PawLine app and is only used for local development.

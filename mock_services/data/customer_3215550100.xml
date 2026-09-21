@@ -1,0 +1,18 @@
+<customer>
+  <customerId>cust_1001</customerId>
+  <firstName>Andrea</firstName>
+  <lastName>Peterson</lastName>
+  <phoneNumber>3212222222</phoneNumber>
+  <pets>
+    <pet>
+      <petId>pet_2001</petId>
+      <name>Milo</name>
+      <species>dog</species>
+    </pet>
+    <pet>
+      <petId>pet_2002</petId>
+      <name>Maize</name>
+      <species>dog</species>
+    </pet>
+  </pets>
+</customer>
