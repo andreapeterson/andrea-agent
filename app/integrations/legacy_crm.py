@@ -1,10 +1,16 @@
 import xml.etree.ElementTree as ET
 
+import httpx
+
 from app.models.customer import Customer, Pet, PetSpecies
 
 
 class LegacyCRMParseError(ValueError):
     """Raised when the legacy CRM XML payload is invalid."""
+
+
+class LegacyCRMRequestError(RuntimeError):
+    """Raised when the legacy CRM HTTP request fails."""
 
 
 def _require_text(element: ET.Element, tag: str, label: str) -> str:
@@ -47,3 +53,40 @@ def parse_customer_xml(xml_text: str) -> Customer:
         phone_number=phone_number,
         pets=pets,
     )
+
+
+class LegacyCRMClient:
+    def __init__(
+        self,
+        base_url: str,
+        api_key: str,
+        timeout_seconds: float = 5.0,
+        *,
+        transport: httpx.AsyncBaseTransport | None = None,
+    ) -> None:
+        self._base_url = base_url.rstrip("/")
+        self._api_key = api_key
+        self._timeout_seconds = timeout_seconds
+        self._transport = transport
+
+    async def find_customer_by_phone(self, phone: str) -> Customer | None:
+        async with httpx.AsyncClient(
+            base_url=self._base_url,
+            timeout=self._timeout_seconds,
+            transport=self._transport,
+        ) as client:
+            try:
+                response = await client.get(
+                    "/customers/by-phone",
+                    params={"phone": phone},
+                    headers={"X-API-Key": self._api_key},
+                )
+            except httpx.RequestError as exc:
+                raise LegacyCRMRequestError("Legacy CRM request failed.") from exc
+
+        if response.status_code == 200:
+            return parse_customer_xml(response.text)
+        if response.status_code == 404:
+            return None
+
+        raise LegacyCRMRequestError(f"Legacy CRM request failed with status {response.status_code}.")
