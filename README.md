@@ -12,12 +12,25 @@ This project uses `uv` as the package manager and runner.
 cd pawline
 uv sync --dev
 uv run pytest -q
-uv run uvicorn app.main:app --reload
+```
+
+## Full-stack local run
+
+Terminal 1: mock CRM service
+
+```bash
+MOCK_CRM_API_KEY=dev-crm-key uv run uvicorn mock_services.legacy_crm_api:app --reload --port 8001
+```
+
+Terminal 2: PawLine app
+
+```bash
+LEGACY_CRM_BASE_URL=http://127.0.0.1:8001 LEGACY_CRM_API_KEY=dev-crm-key uv run uvicorn app.main:app --reload --port 8000
 ```
 
 ## Health check
 
-Once the app is running:
+Once the PawLine app is running:
 
 ```bash
 curl http://127.0.0.1:8000/health
@@ -29,25 +42,14 @@ Expected response:
 {"status": "ok"}
 ```
 
-## Mock CRM service
-
-The repository also includes a separate mock legacy CRM service for local development only.
-
-Run it on port 8001:
+## Customer lookup check
 
 ```bash
-cd pawline
-uv run uvicorn mock_services.legacy_crm_api:app --host 127.0.0.1 --port 8001 --reload
-```
-
-Example request:
-
-```bash
-curl -H "X-API-Key: dev-crm-key" "http://127.0.0.1:8001/customers/by-phone?phone=3215550100"
+curl "http://127.0.0.1:8000/customers/lookup?phone=3212222222"
 ```
 
 ## Notes
 
 - Python 3.12+ is targeted for the project.
 - Dependencies are managed with `uv` instead of `pip`.
-- The mock CRM is intentionally separate from the PawLine app and is not yet connected to the customer lookup flow.
+- The mock CRM is intentionally separate from the PawLine app and is only used for local development.

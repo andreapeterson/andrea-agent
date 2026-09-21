@@ -49,9 +49,9 @@ def test_parse_customer_xml_malformed() -> None:
 def test_parse_customer_xml_missing_required_customer_field() -> None:
     xml_text = """
     <customer>
-      <firstName>Avery</firstName>
-      <lastName>Carter</lastName>
-      <phoneNumber>3215550100</phoneNumber>
+      <firstName>Andrea</firstName>
+      <lastName>Peterson</lastName>
+      <phoneNumber>3212222222</phoneNumber>
       <pets />
     </customer>
     """
@@ -64,9 +64,9 @@ def test_parse_customer_xml_unsupported_pet_species() -> None:
     xml_text = """
     <customer>
       <customerId>cust_1001</customerId>
-      <firstName>Avery</firstName>
-      <lastName>Carter</lastName>
-      <phoneNumber>3215550100</phoneNumber>
+      <firstName>Andrea</firstName>
+      <lastName>Peterson</lastName>
+      <phoneNumber>3212222222</phoneNumber>
       <pets>
         <pet>
           <petId>pet_2001</petId>
