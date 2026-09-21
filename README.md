@@ -2,7 +2,7 @@
 
 PawLine is a minimal scaffold for an after-hours veterinary intake and escalation AI agent.
 
-This repository intentionally contains only the initial project skeleton. The AI agent, RAG layer, database, customer system, scheduling system, voice interface, and frontend are not yet implemented.
+This repository contains the initial implementation foundation for the after-hours veterinary intake flow. The customer lookup flow is implemented, while the AI agent, RAG layer, database, scheduling system, voice interface, and frontend remain future work.
 
 ## Local setup
 
