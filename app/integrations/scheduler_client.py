@@ -19,6 +19,18 @@ class SchedulerResponseError(SchedulerError):
     """Raised when the scheduler returns invalid JSON or schema-mismatched data."""
 
 
+class SchedulingConflictError(SchedulerRequestError):
+    """Raised when the scheduler rejects a booking because of a conflict."""
+
+
+class SlotUnavailableError(SchedulingConflictError):
+    """Raised when the requested slot is no longer available."""
+
+
+class IdempotencyConflictError(SchedulingConflictError):
+    """Raised when the idempotency key is reused with different data."""
+
+
 class SlotNotFoundError(SchedulerRequestError):
     """Raised when the scheduler cannot find the requested slot."""
 
@@ -35,8 +47,8 @@ class SchedulerClient:
         timeout_seconds: float = 5.0,
         *, #every parameter after this must be passed as a keyword argument i.e. transport=None
         transport: httpx.AsyncBaseTransport | None = None,
-    ) -> None: 
-        self._base_url = base_url.rstrip("/") 
+    ) -> None:
+        self._base_url = base_url.rstrip("/")
         self._jwt_secret = jwt_secret
         self._timeout_seconds = timeout_seconds
         self._transport = transport
@@ -93,7 +105,11 @@ class SchedulerClient:
     async def book_appointment(
         self,
         booking_request: BookingRequest,
+        idempotency_key: str,
     ) -> BookingConfirmation:
+        headers = self._authorization_headers()
+        headers["Idempotency-Key"] = idempotency_key
+
         async with httpx.AsyncClient(
             base_url=self._base_url,
             timeout=self._timeout_seconds,
@@ -103,7 +119,7 @@ class SchedulerClient:
                 response = await client.post(
                     "/bookings",
                     json=booking_request.model_dump(mode="json"),
-                    headers=self._authorization_headers(),
+                    headers=headers,
                 )
             except httpx.RequestError as exc:
                 raise SchedulerRequestError("Scheduler request failed.") from exc
@@ -128,5 +144,15 @@ class SchedulerClient:
                 detail = None
             if detail == "caller-confirmation-required":
                 raise CallerConfirmationRequiredError("Caller confirmation required.")
+
+        if response.status_code == 409:
+            try:
+                detail = response.json().get("detail")
+            except ValueError:
+                detail = None
+            if detail == "slot-unavailable":
+                raise SlotUnavailableError("Slot unavailable.")
+            if detail == "idempotency-key-reused":
+                raise IdempotencyConflictError("Idempotency key reused.")
 
         raise SchedulerRequestError(f"Scheduler request failed with status {response.status_code}.")

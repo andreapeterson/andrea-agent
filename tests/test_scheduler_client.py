@@ -117,6 +117,7 @@ async def test_book_appointment_sends_correct_json_body() -> None:
         assert request.method == "POST"
         assert request.url.path == "/bookings"
         assert request.headers["Authorization"].startswith("Bearer ")
+        assert request.headers["Idempotency-Key"] == "req-123"
         assert request.content is not None
         body = request.read()
         assert b'"slot_id":"slot_same_day_01"' in body
@@ -145,7 +146,8 @@ async def test_book_appointment_sends_correct_json_body() -> None:
             slot_id="slot_same_day_01",
             pet_id="pet_2001",
             confirmed_by_caller=True,
-        )
+        ),
+        "req-123",
     )
 
     assert booking == BookingConfirmation(
@@ -174,7 +176,8 @@ async def test_book_appointment_404_raises_slot_not_found() -> None:
                 slot_id="missing_slot",
                 pet_id="pet_2001",
                 confirmed_by_caller=True,
-            )
+            ),
+            "req-123",
         )
 
 
@@ -196,7 +199,8 @@ async def test_book_appointment_caller_confirmation_required_raises() -> None:
                 slot_id="slot_same_day_01",
                 pet_id="pet_2001",
                 confirmed_by_caller=False,
-            )
+            ),
+            "req-123",
         )
 
 

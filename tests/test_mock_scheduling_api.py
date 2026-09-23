@@ -1,9 +1,10 @@
 from datetime import datetime, timedelta, timezone
 
 import jwt
+import pytest
 from fastapi.testclient import TestClient
 
-from mock_services.scheduling_api import app
+from mock_services.scheduling_api import app, reset_booking_store
 
 TEST_SECRET = "test-scheduler-secret"
 
@@ -29,10 +30,18 @@ def _token(*, expired: bool = False, bad_signature: bool = False, wrong_issuer: 
     return jwt.encode(payload, signing_secret, algorithm="HS256")
 
 
-def _auth_headers(token: str | None = None) -> dict[str, str]:
-    if token is None:
-        return {}
-    return {"Authorization": f"Bearer {token}"}
+def _auth_headers(token: str | None = None, idempotency_key: str | None = None) -> dict[str, str]:
+    headers: dict[str, str] = {}
+    if token is not None:
+        headers["Authorization"] = f"Bearer {token}"
+    if idempotency_key is not None:
+        headers["Idempotency-Key"] = idempotency_key
+    return headers
+
+
+@pytest.fixture(autouse=True)
+def reset_state() -> None:
+    reset_booking_store()
 
 
 def test_valid_jwt_can_retrieve_json_slots(monkeypatch) -> None:
@@ -130,7 +139,7 @@ def test_confirmed_booking_returns_201_and_json(monkeypatch) -> None:
             "pet_id": "pet_2001",
             "confirmed_by_caller": True,
         },
-        headers=_auth_headers(token),
+        headers=_auth_headers(token, "booking-1"),
     )
 
     assert response.status_code == 201
@@ -153,7 +162,7 @@ def test_nonexistent_slot_returns_404(monkeypatch) -> None:
             "pet_id": "pet_2001",
             "confirmed_by_caller": True,
         },
-        headers=_auth_headers(token),
+        headers=_auth_headers(token, "booking-2"),
     )
 
     assert response.status_code == 404
@@ -172,7 +181,7 @@ def test_booking_without_caller_confirmation_returns_400(monkeypatch) -> None:
             "pet_id": "pet_2001",
             "confirmed_by_caller": False,
         },
-        headers=_auth_headers(token),
+        headers=_auth_headers(token, "booking-3"),
     )
 
     assert response.status_code == 400

@@ -25,6 +25,7 @@ class FakeSchedulerClient:
         self.passed_pet_ids: list[str] = []
         self.passed_appointment_types: list[AppointmentType] = []
         self.booking_requests: list[BookingRequest] = []
+        self.passed_idempotency_keys: list[str] = []
         self.slots_to_return: list[AppointmentSlot] = [
             AppointmentSlot(
                 slot_id="slot_same_day_01",
@@ -50,8 +51,9 @@ class FakeSchedulerClient:
             raise self.find_slots_error
         return self.slots_to_return
 
-    async def book_appointment(self, booking_request: BookingRequest) -> BookingConfirmation:
+    async def book_appointment(self, booking_request: BookingRequest, idempotency_key: str) -> BookingConfirmation:
         self.booking_requests.append(booking_request)
+        self.passed_idempotency_keys.append(idempotency_key)
         if self.book_appointment_error is not None:
             raise self.book_appointment_error
         return self.booking_to_return
@@ -118,6 +120,7 @@ def test_post_appointment_booking_success(client: TestClient, fake_scheduler_cli
             "pet_id": "pet_2001",
             "confirmed_by_caller": True,
         },
+        headers={"Idempotency-Key": "req-123"},
     )
 
     assert response.status_code == 201
@@ -129,6 +132,7 @@ def test_post_appointment_booking_success(client: TestClient, fake_scheduler_cli
         pet_id="pet_2001",
         confirmed_by_caller=True,
     )
+    assert fake_scheduler_client.passed_idempotency_keys == ["req-123"]
 
 
 def test_post_appointment_booking_missing_or_invalid_body_fields(client: TestClient) -> None:
@@ -156,6 +160,7 @@ def test_post_appointment_booking_slot_not_found(client: TestClient, fake_schedu
             "pet_id": "pet_2001",
             "confirmed_by_caller": True,
         },
+        headers={"Idempotency-Key": "req-123"},
     )
 
     assert response.status_code == 404
@@ -172,6 +177,7 @@ def test_post_appointment_booking_confirmation_required(client: TestClient, fake
             "pet_id": "pet_2001",
             "confirmed_by_caller": False,
         },
+        headers={"Idempotency-Key": "req-123"},
     )
 
     assert response.status_code == 400
@@ -188,6 +194,7 @@ def test_post_appointment_booking_scheduler_response_error(client: TestClient, f
             "pet_id": "pet_2001",
             "confirmed_by_caller": True,
         },
+        headers={"Idempotency-Key": "req-123"},
     )
 
     assert response.status_code == 502
@@ -204,6 +211,7 @@ def test_post_appointment_booking_scheduler_request_error(client: TestClient, fa
             "pet_id": "pet_2001",
             "confirmed_by_caller": True,
         },
+        headers={"Idempotency-Key": "req-123"},
     )
 
     assert response.status_code == 503

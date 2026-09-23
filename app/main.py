@@ -1,14 +1,16 @@
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query
 
 from app.dependencies import get_legacy_crm_client, get_scheduler_client
 from app.integrations import (
     CallerConfirmationRequiredError,
+    IdempotencyConflictError,
     LegacyCRMParseError,
     LegacyCRMRequestError,
     SchedulerClient,
     SchedulerRequestError,
     SchedulerResponseError,
     SlotNotFoundError,
+    SlotUnavailableError,
 )
 from app.models.appointment import AppointmentSlot, AppointmentType, BookingConfirmation, BookingRequest
 from app.models.customer import Customer
@@ -56,14 +58,19 @@ async def list_appointment_slots(
 @app.post("/appointments/bookings", response_model=BookingConfirmation, status_code=201)
 async def create_appointment_booking(
     booking_request: BookingRequest,
+    idempotency_key: str = Header(..., alias="Idempotency-Key"),
     scheduler_client: SchedulerClient = Depends(get_scheduler_client),
 ) -> BookingConfirmation:
     try:
-        return await scheduler_client.book_appointment(booking_request)
+        return await scheduler_client.book_appointment(booking_request, idempotency_key)
     except SlotNotFoundError as error:
         raise HTTPException(status_code=404, detail="Slot not found") from error
     except CallerConfirmationRequiredError as error:
         raise HTTPException(status_code=400, detail="caller-confirmation-required") from error
+    except SlotUnavailableError as error:
+        raise HTTPException(status_code=409, detail="slot-unavailable") from error
+    except IdempotencyConflictError as error:
+        raise HTTPException(status_code=409, detail="idempotency-key-reused") from error
     except SchedulerResponseError as error:
         raise HTTPException(status_code=502, detail="invalid-scheduler-data") from error
     except SchedulerRequestError as error:
