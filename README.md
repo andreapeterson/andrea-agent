@@ -22,10 +22,16 @@ Terminal 1: mock CRM service
 MOCK_CRM_API_KEY=dev-crm-key uv run uvicorn mock_services.legacy_crm_api:app --reload --port 8001
 ```
 
-Terminal 2: PawLine app
+Terminal 2: mock scheduling service
 
 ```bash
-LEGACY_CRM_BASE_URL=http://127.0.0.1:8001 LEGACY_CRM_API_KEY=dev-crm-key uv run uvicorn app.main:app --reload --port 8000
+MOCK_SCHEDULER_JWT_SECRET=dev-scheduler-secret uv run uvicorn mock_services.scheduling_api:app --reload --port 8002
+```
+
+Terminal 3: PawLine app
+
+```bash
+LEGACY_CRM_BASE_URL=http://127.0.0.1:8001 LEGACY_CRM_API_KEY=dev-crm-key SCHEDULER_BASE_URL=http://127.0.0.1:8002 SCHEDULER_JWT_SECRET=dev-scheduler-secret uv run uvicorn app.main:app --reload --port 8000
 ```
 
 ## Health check
@@ -46,6 +52,24 @@ Expected response:
 
 ```bash
 curl "http://127.0.0.1:8000/customers/lookup?phone=3212222222"
+```
+
+## Appointment slot lookup
+
+```bash
+curl -H "Authorization: Bearer <ignored-for-local-demo>" "http://127.0.0.1:8000/appointments/slots?pet_id=pet_2001&appointment_type=same_day"
+```
+
+## Appointment booking
+
+```bash
+curl -X POST http://127.0.0.1:8000/appointments/bookings \
+  -H "Content-Type: application/json" \
+  -d '{
+    "slot_id": "slot_same_day_01",
+    "pet_id": "pet_2001",
+    "confirmed_by_caller": true
+  }'
 ```
 
 ## Notes
