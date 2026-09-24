@@ -14,7 +14,7 @@ from app.integrations.handoff_client import (
     HandoffRequestError,
     HandoffResponseError,
 )
-from app.models.handoff import HandoffReceipt, HandoffRequest, HandoffStatus
+from app.models.handoff import HandoffReceipt, HandoffRequest, HandoffStatus, HandoffSummary
 from app.models.routing import IntakeAnswers, RoutingAction, RoutingDecision, RoutingLevel
 
 TEST_SECRET = "test-handoff-secret"
@@ -39,6 +39,19 @@ def _make_handoff_request() -> HandoffRequest:
             next_action=RoutingAction.CREATE_HANDOFF,
             matched_rule_ids=["urgent-difficulty-breathing"],
             missing_fields=[],
+        ),
+        summary=HandoffSummary(
+            original_concern="labored breathing",
+            routing_level=RoutingLevel.URGENT,
+            positive_signals=["difficulty_breathing"],
+            negative_signals=[
+                "uncontrolled_bleeding",
+                "collapsed_or_unresponsive",
+                "known_toxin_exposure",
+                "rapidly_worsening",
+            ],
+            unanswered_signals=[],
+            matched_rule_ids=["urgent-difficulty-breathing"],
         ),
     )
 

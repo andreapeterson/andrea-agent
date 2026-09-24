@@ -47,6 +47,19 @@ def _urgent_payload() -> dict:
             "matched_rule_ids": ["urgent-difficulty-breathing"],
             "missing_fields": [],
         },
+        "summary": {
+            "original_concern": "labored breathing",
+            "routing_level": "urgent",
+            "positive_signals": ["difficulty_breathing"],
+            "negative_signals": [
+                "uncontrolled_bleeding",
+                "collapsed_or_unresponsive",
+                "known_toxin_exposure",
+                "rapidly_worsening",
+            ],
+            "unanswered_signals": [],
+            "matched_rule_ids": ["urgent-difficulty-breathing"],
+        },
     }
 
 
@@ -68,6 +81,20 @@ def _non_urgent_payload() -> dict:
             "next_action": "search_routine_appointment",
             "matched_rule_ids": ["routine-no-escalation-indicators"],
             "missing_fields": [],
+        },
+        "summary": {
+            "original_concern": "mild limp",
+            "routing_level": "routine",
+            "positive_signals": [],
+            "negative_signals": [
+                "difficulty_breathing",
+                "uncontrolled_bleeding",
+                "collapsed_or_unresponsive",
+                "known_toxin_exposure",
+                "rapidly_worsening",
+            ],
+            "unanswered_signals": [],
+            "matched_rule_ids": ["routine-no-escalation-indicators"],
         },
     }
 

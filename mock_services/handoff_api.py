@@ -11,6 +11,7 @@ from app.models.handoff import HandoffReceipt, HandoffRequest, HandoffStatus
 from app.models.routing import RoutingAction, RoutingLevel
 
 app = FastAPI(title="Mock Human Handoff API")
+HANDOFF_STORE: list[HandoffRequest] = []
 
 MAX_CLOCK_SKEW_SECONDS = 300
 MAX_FUTURE_SECONDS = 60
@@ -22,6 +23,10 @@ def _handoff_secret() -> str:
 
 def _invalid_signature() -> HTTPException:
     return HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing signature")
+
+
+def reset_handoff_store() -> None:
+    HANDOFF_STORE.clear()
 
 
 async def verify_handoff_signature(request: Request) -> None:
@@ -62,6 +67,8 @@ async def create_handoff(
 ) -> HandoffReceipt:
     if request.routing_decision.routing_level != RoutingLevel.URGENT or request.routing_decision.next_action != RoutingAction.CREATE_HANDOFF:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="handoff-not-required")
+
+    HANDOFF_STORE.append(request.model_copy(deep=True))
 
     case_id = f"case_{uuid4().hex}"
     return HandoffReceipt(

@@ -20,6 +20,7 @@ from app.models.appointment import AppointmentSlot, AppointmentType, BookingConf
 from app.models.customer import Customer
 from app.models.handoff import HandoffCreateRequest, HandoffReceipt, HandoffRequest
 from app.models.routing import RoutingAction
+from app.services.handoff_summary import build_handoff_summary
 from app.services.routing import assess_routing
 
 app = FastAPI(title="PawLine")
@@ -93,6 +94,12 @@ async def create_handoff(
     if routing_decision.next_action != RoutingAction.CREATE_HANDOFF:
         raise HTTPException(status_code=409, detail="handoff-not-required")
 
+    summary = build_handoff_summary(
+        handoff_create_request.original_concern,
+        handoff_create_request.intake_answers,
+        routing_decision,
+    )
+
     handoff_request = HandoffRequest(
         conversation_id=handoff_create_request.conversation_id,
         verified_customer_id=handoff_create_request.verified_customer_id,
@@ -100,6 +107,7 @@ async def create_handoff(
         original_concern=handoff_create_request.original_concern,
         intake_answers=handoff_create_request.intake_answers,
         routing_decision=routing_decision,
+        summary=summary,
     )
 
     try:
