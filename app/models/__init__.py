@@ -8,6 +8,12 @@ from .appointment import (
     BookingStatus,
 )
 from .customer import Customer, Pet, PetSpecies
+from .routing import (
+    IntakeAnswers,
+    RoutingAction,
+    RoutingDecision,
+    RoutingLevel,
+)
 
 __all__ = [
     "AppointmentSlot",
@@ -16,6 +22,10 @@ __all__ = [
     "BookingRequest",
     "BookingStatus",
     "Customer",
+    "IntakeAnswers",
     "Pet",
     "PetSpecies",
+    "RoutingAction",
+    "RoutingDecision",
+    "RoutingLevel",
 ]
