@@ -28,7 +28,13 @@ Terminal 2: mock scheduling service
 MOCK_SCHEDULER_JWT_SECRET=dev-scheduler-secret uv run uvicorn mock_services.scheduling_api:app --reload --port 8002
 ```
 
-Terminal 3: PawLine app
+Terminal 3: mock handoff service
+
+```bash
+MOCK_HANDOFF_WEBHOOK_SECRET=dev-handoff-secret uv run uvicorn mock_services.handoff_api:app --reload --port 8003
+```
+
+Terminal 4: PawLine app
 
 ```bash
 LEGACY_CRM_BASE_URL=http://127.0.0.1:8001 LEGACY_CRM_API_KEY=dev-crm-key SCHEDULER_BASE_URL=http://127.0.0.1:8002 SCHEDULER_JWT_SECRET=dev-scheduler-secret uv run uvicorn app.main:app --reload --port 8000
@@ -71,6 +77,10 @@ curl -X POST http://127.0.0.1:8000/appointments/bookings \
     "confirmed_by_caller": true
   }'
 ```
+
+## Handoff webhook note
+
+Direct manual curl testing for the handoff webhook is inconvenient because the signature must match the exact request-body bytes. Automated tests are sufficient for this checkpoint.
 
 ## Notes
 
