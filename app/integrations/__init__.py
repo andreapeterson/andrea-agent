@@ -1,5 +1,12 @@
 """Integration helpers for external systems."""
 
+from .handoff_client import (
+    HandoffClient,
+    HandoffClientError,
+    HandoffNotRequiredError,
+    HandoffRequestError,
+    HandoffResponseError,
+)
 from .legacy_crm import LegacyCRMClient, LegacyCRMParseError, LegacyCRMRequestError, parse_customer_xml
 from .scheduler_client import (
     CallerConfirmationRequiredError,
@@ -15,6 +22,11 @@ from .scheduler_client import (
 
 __all__ = [
     "CallerConfirmationRequiredError",
+    "HandoffClient",
+    "HandoffClientError",
+    "HandoffNotRequiredError",
+    "HandoffRequestError",
+    "HandoffResponseError",
     "IdempotencyConflictError",
     "LegacyCRMClient",
     "LegacyCRMParseError",

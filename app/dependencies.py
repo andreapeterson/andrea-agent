@@ -1,6 +1,6 @@
 import os
 
-from app.integrations import LegacyCRMClient, SchedulerClient
+from app.integrations import HandoffClient, LegacyCRMClient, SchedulerClient
 
 
 def get_legacy_crm_client() -> LegacyCRMClient:
@@ -21,3 +21,13 @@ def get_scheduler_client() -> SchedulerClient:
             "SCHEDULER_JWT_SECRET is not configured. Set it in the environment before starting the app."
         )
     return SchedulerClient(base_url=base_url, jwt_secret=jwt_secret)
+
+
+def get_handoff_client() -> HandoffClient:
+    base_url = os.getenv("HANDOFF_BASE_URL", "http://127.0.0.1:8003")
+    webhook_secret = os.getenv("HANDOFF_WEBHOOK_SECRET")
+    if not webhook_secret:
+        raise RuntimeError(
+            "HANDOFF_WEBHOOK_SECRET is not configured. Set it in the environment before starting the app."
+        )
+    return HandoffClient(base_url=base_url, webhook_secret=webhook_secret)

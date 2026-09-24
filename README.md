@@ -16,28 +16,28 @@ uv run pytest -q
 
 ## Full-stack local run
 
-Terminal 1: mock CRM service
+Terminal 1: PawLine app
+
+```bash
+LEGACY_CRM_BASE_URL=http://127.0.0.1:8001 LEGACY_CRM_API_KEY=dev-crm-key SCHEDULER_BASE_URL=http://127.0.0.1:8002 SCHEDULER_JWT_SECRET=dev-scheduler-secret HANDOFF_BASE_URL=http://127.0.0.1:8003 HANDOFF_WEBHOOK_SECRET=dev-handoff-secret uv run uvicorn app.main:app --reload --port 8000
+```
+
+Terminal 2: mock CRM service
 
 ```bash
 MOCK_CRM_API_KEY=dev-crm-key uv run uvicorn mock_services.legacy_crm_api:app --reload --port 8001
 ```
 
-Terminal 2: mock scheduling service
+Terminal 3: mock scheduling service
 
 ```bash
 MOCK_SCHEDULER_JWT_SECRET=dev-scheduler-secret uv run uvicorn mock_services.scheduling_api:app --reload --port 8002
 ```
 
-Terminal 3: mock handoff service
+Terminal 4: mock handoff service
 
 ```bash
 MOCK_HANDOFF_WEBHOOK_SECRET=dev-handoff-secret uv run uvicorn mock_services.handoff_api:app --reload --port 8003
-```
-
-Terminal 4: PawLine app
-
-```bash
-LEGACY_CRM_BASE_URL=http://127.0.0.1:8001 LEGACY_CRM_API_KEY=dev-crm-key SCHEDULER_BASE_URL=http://127.0.0.1:8002 SCHEDULER_JWT_SECRET=dev-scheduler-secret uv run uvicorn app.main:app --reload --port 8000
 ```
 
 ## Health check
@@ -81,6 +81,28 @@ curl -X POST http://127.0.0.1:8000/appointments/bookings \
 ## Handoff webhook note
 
 Direct manual curl testing for the handoff webhook is inconvenient because the signature must match the exact request-body bytes. Automated tests are sufficient for this checkpoint.
+
+## PawLine handoff example
+
+The PawLine app computes the routing decision internally before it sends a handoff webhook. The caller sends intake information only; it does not send a routing_decision, case_id, status, or HMAC signature.
+
+```bash
+curl -X POST http://127.0.0.1:8000/handoffs \
+  -H "Content-Type: application/json" \
+  -d '{
+    "conversation_id": "conv-demo-001",
+    "verified_customer_id": "customer_1001",
+    "selected_pet_id": "pet_2001",
+    "original_concern": "labored breathing",
+    "intake_answers": {
+      "difficulty_breathing": true,
+      "uncontrolled_bleeding": false,
+      "collapsed_or_unresponsive": false,
+      "known_toxin_exposure": false,
+      "rapidly_worsening": false
+    }
+  }'
+```
 
 ## Notes
 

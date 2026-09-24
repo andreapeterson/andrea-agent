@@ -8,8 +8,18 @@ from pydantic import BaseModel, ConfigDict, Field
 from .routing import IntakeAnswers, RoutingDecision
 
 
+class HandoffCreateRequest(BaseModel):
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
+
+    conversation_id: str = Field(..., min_length=1)
+    verified_customer_id: str = Field(..., min_length=1)
+    selected_pet_id: str = Field(..., min_length=1)
+    original_concern: str = Field(..., min_length=1)
+    intake_answers: IntakeAnswers
+
+
 class HandoffRequest(BaseModel):
-    model_config = ConfigDict(str_strip_whitespace=True)
+    model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
     conversation_id: str = Field(..., min_length=1)
     verified_customer_id: str = Field(..., min_length=1)

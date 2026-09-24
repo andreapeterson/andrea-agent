@@ -8,7 +8,7 @@ from .appointment import (
     BookingStatus,
 )
 from .customer import Customer, Pet, PetSpecies
-from .handoff import HandoffReceipt, HandoffRequest, HandoffStatus
+from .handoff import HandoffCreateRequest, HandoffReceipt, HandoffRequest, HandoffStatus
 from .routing import (
     IntakeAnswers,
     RoutingAction,
@@ -23,6 +23,7 @@ __all__ = [
     "BookingRequest",
     "BookingStatus",
     "Customer",
+    "HandoffCreateRequest",
     "HandoffReceipt",
     "HandoffRequest",
     "HandoffStatus",
