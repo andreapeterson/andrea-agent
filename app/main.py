@@ -1,8 +1,12 @@
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 
-from app.dependencies import get_legacy_crm_client, get_scheduler_client
+from app.dependencies import get_handoff_client, get_legacy_crm_client, get_scheduler_client
 from app.integrations import (
     CallerConfirmationRequiredError,
+    HandoffClient,
+    HandoffNotRequiredError,
+    HandoffRequestError,
+    HandoffResponseError,
     IdempotencyConflictError,
     LegacyCRMParseError,
     LegacyCRMRequestError,
@@ -14,6 +18,10 @@ from app.integrations import (
 )
 from app.models.appointment import AppointmentSlot, AppointmentType, BookingConfirmation, BookingRequest
 from app.models.customer import Customer
+from app.models.handoff import HandoffCreateRequest, HandoffReceipt, HandoffRequest
+from app.models.routing import RoutingAction
+from app.services.handoff_summary import build_handoff_summary
+from app.services.routing import assess_routing
 
 app = FastAPI(title="PawLine")
 
@@ -75,4 +83,39 @@ async def create_appointment_booking(
         raise HTTPException(status_code=502, detail="invalid-scheduler-data") from error
     except SchedulerRequestError as error:
         raise HTTPException(status_code=503, detail="scheduling-service-unavailable") from error
+
+
+@app.post("/handoffs", response_model=HandoffReceipt, status_code=202)
+async def create_handoff(
+    handoff_create_request: HandoffCreateRequest,
+    handoff_client: HandoffClient = Depends(get_handoff_client),
+) -> HandoffReceipt:
+    routing_decision = assess_routing(handoff_create_request.intake_answers)
+    if routing_decision.next_action != RoutingAction.CREATE_HANDOFF:
+        raise HTTPException(status_code=409, detail="handoff-not-required")
+
+    summary = build_handoff_summary(
+        handoff_create_request.original_concern,
+        handoff_create_request.intake_answers,
+        routing_decision,
+    )
+
+    handoff_request = HandoffRequest(
+        conversation_id=handoff_create_request.conversation_id,
+        verified_customer_id=handoff_create_request.verified_customer_id,
+        selected_pet_id=handoff_create_request.selected_pet_id,
+        original_concern=handoff_create_request.original_concern,
+        intake_answers=handoff_create_request.intake_answers,
+        routing_decision=routing_decision,
+        summary=summary,
+    )
+
+    try:
+        return await handoff_client.create_handoff(handoff_request)
+    except HandoffNotRequiredError as error:
+        raise HTTPException(status_code=409, detail="handoff-not-required") from error
+    except HandoffResponseError as error:
+        raise HTTPException(status_code=502, detail="invalid-handoff-data") from error
+    except HandoffRequestError as error:
+        raise HTTPException(status_code=503, detail="handoff-service-unavailable") from error
 
