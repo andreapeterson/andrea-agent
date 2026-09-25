@@ -9,6 +9,7 @@ from .appointment import (
 )
 from .customer import Customer, Pet, PetSpecies
 from .handoff import HandoffCreateRequest, HandoffReceipt, HandoffRequest, HandoffStatus, HandoffSummary
+from .policy import PolicyChunk, PolicyDocument
 from .routing import (
     IntakeAnswers,
     RoutingAction,
@@ -30,6 +31,8 @@ __all__ = [
     "HandoffSummary",
     "IntakeAnswers",
     "Pet",
+    "PolicyChunk",
+    "PolicyDocument",
     "PetSpecies",
     "RoutingAction",
     "RoutingDecision",

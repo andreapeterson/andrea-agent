@@ -104,6 +104,15 @@ curl -X POST http://127.0.0.1:8000/handoffs \
   }'
 ```
 
+## Part 5: clinic policy RAG foundation
+
+This checkpoint adds the first step of a small administrative policy knowledge layer for PawLine.
+
+- The RAG system is only for administrative clinic policies, not veterinary advice or medical triage.
+- PawLine safety routing remains the deterministic Python decision path for urgent medical concerns.
+- Part 5A currently loads and chunks fictional clinic policy Markdown documents.
+- Embedding, retrieval, and grounded answer generation belong to later checkpoints.
+
 ## Notes
 
 - Python 3.12+ is targeted for the project.
