@@ -1,5 +1,12 @@
 """Integration helpers for external systems."""
 
+from .embeddings import (
+    EmbeddingError,
+    EmbeddingProvider,
+    EmbeddingRequestError,
+    EmbeddingResponseError,
+    OpenAIEmbeddingProvider,
+)
 from .handoff_client import (
     HandoffClient,
     HandoffClientError,
@@ -22,6 +29,10 @@ from .scheduler_client import (
 
 __all__ = [
     "CallerConfirmationRequiredError",
+    "EmbeddingError",
+    "EmbeddingProvider",
+    "EmbeddingRequestError",
+    "EmbeddingResponseError",
     "HandoffClient",
     "HandoffClientError",
     "HandoffNotRequiredError",
@@ -31,6 +42,7 @@ __all__ = [
     "LegacyCRMClient",
     "LegacyCRMParseError",
     "LegacyCRMRequestError",
+    "OpenAIEmbeddingProvider",
     "SchedulingConflictError",
     "SchedulerClient",
     "SchedulerError",

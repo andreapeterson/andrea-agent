@@ -110,8 +110,11 @@ This checkpoint adds the first step of a small administrative policy knowledge l
 
 - The RAG system is only for administrative clinic policies, not veterinary advice or medical triage.
 - PawLine safety routing remains the deterministic Python decision path for urgent medical concerns.
-- Part 5A currently loads and chunks fictional clinic policy Markdown documents.
+- Part 5A loads and chunks fictional clinic policy Markdown documents.
+- Part 5B converts policy chunks and search queries into vectors and ranks them by cosine similarity with text-embedding-3-small as the default real provider model.
 - Embedding, retrieval, and grounded answer generation belong to later checkpoints.
+
+For real OpenAI calls, `OPENAI_API_KEY` is required. Automated tests do not use real OpenAI calls and do not require an API key.
 
 ## Notes
 

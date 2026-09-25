@@ -10,6 +10,7 @@ from .appointment import (
 from .customer import Customer, Pet, PetSpecies
 from .handoff import HandoffCreateRequest, HandoffReceipt, HandoffRequest, HandoffStatus, HandoffSummary
 from .policy import PolicyChunk, PolicyDocument
+from .retrieval import EmbeddedPolicyChunk, PolicySearchResult
 from .routing import (
     IntakeAnswers,
     RoutingAction,
@@ -24,6 +25,7 @@ __all__ = [
     "BookingRequest",
     "BookingStatus",
     "Customer",
+    "EmbeddedPolicyChunk",
     "HandoffCreateRequest",
     "HandoffReceipt",
     "HandoffRequest",
@@ -33,6 +35,7 @@ __all__ = [
     "Pet",
     "PolicyChunk",
     "PolicyDocument",
+    "PolicySearchResult",
     "PetSpecies",
     "RoutingAction",
     "RoutingDecision",
