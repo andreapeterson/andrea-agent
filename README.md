@@ -2,7 +2,7 @@
 
 PawLine is a minimal scaffold for an after-hours veterinary intake and escalation AI agent.
 
-This repository contains the initial implementation foundation for the after-hours veterinary intake flow. The customer lookup flow is implemented, while the AI agent, RAG layer, database, scheduling system, voice interface, and frontend remain future work.
+This repository contains the implementation foundation for the after-hours veterinary intake flow. The customer lookup, scheduling, routing, handoff, and clinic-policy RAG foundations are implemented. The broader agent, voice interface, database, and frontend remain future work.
 
 ## Local setup
 
@@ -106,15 +106,76 @@ curl -X POST http://127.0.0.1:8000/handoffs \
 
 ## Part 5: clinic policy RAG foundation
 
-This checkpoint adds the first step of a small administrative policy knowledge layer for PawLine.
+PawLine now has a narrow, auditable policy-answer flow for administrative clinic questions.
 
-- The RAG system is only for administrative clinic policies, not veterinary advice or medical triage.
-- PawLine safety routing remains the deterministic Python decision path for urgent medical concerns.
-- Part 5A loads and chunks fictional clinic policy Markdown documents.
-- Part 5B converts policy chunks and search queries into vectors and ranks them by cosine similarity with text-embedding-3-small as the default real provider model.
-- Embedding, retrieval, and grounded answer generation belong to later checkpoints.
+Policy Markdown
+-> chunks
+-> embeddings
+-> in-memory index
+-> query embedding
+-> cosine-similarity retrieval
+-> relevance gate
+-> grounded generation
+-> verified citations
 
-For real OpenAI calls, `OPENAI_API_KEY` is required. Automated tests do not use real OpenAI calls and do not require an API key.
+Key behaviors:
+
+- The model never receives the entire policy corpus.
+- The model receives only the top retrieved chunks that are most similar to the user question.
+- Similarity thresholding is an initial safeguard that must be evaluated in future Part 7 tuning.
+- PawLine constructs citations from validated chunk IDs rather than trusting the model to invent source names.
+- Medical safety routing remains deterministic and separate from this policy-answer feature.
+- This is a fictional administrative policy layer for clinic operations, not veterinary diagnosis or treatment advice.
+
+### Environment variables
+
+```bash
+export OPENAI_API_KEY="your-api-key"
+export OPENAI_EMBEDDING_MODEL="text-embedding-3-small"
+export OPENAI_POLICY_MODEL="gpt-6-luna"
+export POLICY_MIN_SIMILARITY="0.45"
+export POLICY_TOP_K="3"
+```
+
+Automated tests never call OpenAI and do not require an API key.
+
+### Example request
+
+```bash
+curl -X POST http://127.0.0.1:8000/policies/answer \
+  -H "Content-Type: application/json" \
+  -d '{
+    "question": "Can I cancel my appointment?"
+  }'
+```
+
+Expected response shape:
+
+```json
+{
+  "question": "Can I cancel my appointment?",
+  "answer": "The clinic policy allows appointment cancellations with notice.",
+  "status": "answered",
+  "citations": [
+    {
+      "chunk_id": "appointments::cancellation-policy",
+      "document_id": "appointments",
+      "document_title": "Appointments and Cancellations",
+      "section_title": "Cancellation Policy",
+      "source_name": "appointments_and_cancellations.md"
+    }
+  ]
+}
+```
+
+If the evidence is weak or missing, the route returns `status: "insufficient_context"` with a safe fallback answer and no citations instead of inventing a policy answer.
+
+### Implementation notes
+
+- Policy documents are loaded from the fictional clinic policy Markdown corpus in `knowledge/clinic_policies`.
+- `PolicyRetriever` ranks policy chunks by cosine similarity and keeps the in-memory index stable for repeated requests.
+- The answer-generation boundary is isolated behind a provider protocol so tests can use fake embeddings and fake policy answers without real network calls.
+- PawLine validates the model's supporting chunk IDs before constructing any public citation objects.
 
 ## Notes
 

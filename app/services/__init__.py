@@ -1,6 +1,7 @@
 """Service layer helpers for PawLine."""
 
 from .handoff_summary import build_handoff_summary
+from .policy_answer_service import INSUFFICIENT_CONTEXT_MESSAGE, PolicyAnswerService
 from .policy_loader import PolicyLoadError, chunk_policy_document, load_policy_chunks, load_policy_documents
 from .policy_retriever import (
     InvalidVectorError,
@@ -11,7 +12,9 @@ from .policy_retriever import (
 from .routing import assess_routing
 
 __all__ = [
+    "INSUFFICIENT_CONTEXT_MESSAGE",
     "InvalidVectorError",
+    "PolicyAnswerService",
     "PolicyLoadError",
     "PolicyRetrievalError",
     "PolicyRetriever",
