@@ -1,5 +1,12 @@
 """Integration helpers for external systems."""
 
+from .embeddings import (
+    EmbeddingError,
+    EmbeddingProvider,
+    EmbeddingRequestError,
+    EmbeddingResponseError,
+    OpenAIEmbeddingProvider,
+)
 from .handoff_client import (
     HandoffClient,
     HandoffClientError,
@@ -8,6 +15,14 @@ from .handoff_client import (
     HandoffResponseError,
 )
 from .legacy_crm import LegacyCRMClient, LegacyCRMParseError, LegacyCRMRequestError, parse_customer_xml
+from .policy_answer_generator import (
+    OpenAIPolicyAnswerGenerator,
+    PolicyAnswerGenerator,
+    PolicyGenerationError,
+    PolicyGenerationRequestError,
+    PolicyGenerationResponseError,
+    build_policy_answer_prompt,
+)
 from .scheduler_client import (
     CallerConfirmationRequiredError,
     IdempotencyConflictError,
@@ -22,6 +37,10 @@ from .scheduler_client import (
 
 __all__ = [
     "CallerConfirmationRequiredError",
+    "EmbeddingError",
+    "EmbeddingProvider",
+    "EmbeddingRequestError",
+    "EmbeddingResponseError",
     "HandoffClient",
     "HandoffClientError",
     "HandoffNotRequiredError",
@@ -31,6 +50,12 @@ __all__ = [
     "LegacyCRMClient",
     "LegacyCRMParseError",
     "LegacyCRMRequestError",
+    "OpenAIEmbeddingProvider",
+    "OpenAIPolicyAnswerGenerator",
+    "PolicyAnswerGenerator",
+    "PolicyGenerationError",
+    "PolicyGenerationRequestError",
+    "PolicyGenerationResponseError",
     "SchedulingConflictError",
     "SchedulerClient",
     "SchedulerError",
@@ -38,5 +63,6 @@ __all__ = [
     "SchedulerResponseError",
     "SlotNotFoundError",
     "SlotUnavailableError",
+    "build_policy_answer_prompt",
     "parse_customer_xml",
 ]

@@ -1,6 +1,11 @@
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 
-from app.dependencies import get_handoff_client, get_legacy_crm_client, get_scheduler_client
+from app.dependencies import (
+    get_handoff_client,
+    get_legacy_crm_client,
+    get_policy_answer_service,
+    get_scheduler_client,
+)
 from app.integrations import (
     CallerConfirmationRequiredError,
     HandoffClient,
@@ -10,6 +15,8 @@ from app.integrations import (
     IdempotencyConflictError,
     LegacyCRMParseError,
     LegacyCRMRequestError,
+    PolicyGenerationRequestError,
+    PolicyGenerationResponseError,
     SchedulerClient,
     SchedulerRequestError,
     SchedulerResponseError,
@@ -19,8 +26,11 @@ from app.integrations import (
 from app.models.appointment import AppointmentSlot, AppointmentType, BookingConfirmation, BookingRequest
 from app.models.customer import Customer
 from app.models.handoff import HandoffCreateRequest, HandoffReceipt, HandoffRequest
+from app.models.policy_answer import PolicyAnswerResponse, PolicyQuestionRequest
 from app.models.routing import RoutingAction
+from app.services import PolicyAnswerService
 from app.services.handoff_summary import build_handoff_summary
+from app.services.policy_retriever import PolicyRetrievalError
 from app.services.routing import assess_routing
 
 app = FastAPI(title="PawLine")
@@ -118,4 +128,20 @@ async def create_handoff(
         raise HTTPException(status_code=502, detail="invalid-handoff-data") from error
     except HandoffRequestError as error:
         raise HTTPException(status_code=503, detail="handoff-service-unavailable") from error
+
+
+@app.post("/policies/answer", response_model=PolicyAnswerResponse)
+async def answer_policy_question(
+    question: PolicyQuestionRequest,
+    policy_answer_service: PolicyAnswerService | None = Depends(get_policy_answer_service),
+) -> PolicyAnswerResponse:
+    if policy_answer_service is None:
+        raise HTTPException(status_code=503, detail="policy-service-unavailable")
+
+    try:
+        return await policy_answer_service.answer(question.question)
+    except (RuntimeError, PolicyRetrievalError, PolicyGenerationRequestError) as exc:
+        raise HTTPException(status_code=503, detail="policy-service-unavailable") from exc
+    except PolicyGenerationResponseError as exc:
+        raise HTTPException(status_code=502, detail="invalid-policy-response") from exc
 
