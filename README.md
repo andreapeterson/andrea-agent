@@ -170,6 +170,18 @@ Expected response shape:
 
 If the evidence is weak or missing, the route returns `status: "insufficient_context"` with a safe fallback answer and no citations instead of inventing a policy answer.
 
+## Part 6B: single-turn fact extraction
+
+PawLine now includes a minimal turn-understanding layer for converting one natural-language caller message into typed observations.
+
+- The LLM converts natural language into typed facts such as a phone number, pet reference, concern text, intake updates, or appointment selection.
+- It does not make routing or safety decisions, and it does not choose tools or perform workflow actions.
+- `ExtractedIntakeUpdates` represents only what was clearly present in the newest message; `ConversationState` remains the accumulated memory across a conversation.
+- Deterministic orchestration and tool execution are intentionally deferred to future 6C work.
+- The automated tests use mocked structured output rather than real OpenAI calls.
+
+This is a fact-extraction boundary only: the model may interpret a caller message, but it must not mutate `ConversationState`, create a handoff, or book an appointment.
+
 ## Part 6A: conversation memory foundation
 
 PawLine now includes a minimal internal conversation-memory model for future multi-turn agent work.

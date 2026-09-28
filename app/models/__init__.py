@@ -1,5 +1,6 @@
 """Domain models for PawLine."""
 
+from .agent_turn import ExtractedIntakeUpdates, TurnIntent, TurnUnderstanding
 from .appointment import (
     AppointmentSlot,
     AppointmentType,
@@ -38,6 +39,8 @@ __all__ = [
     "ConversationState",
     "Customer",
     "EmbeddedPolicyChunk",
+    "ExtractedIntakeUpdates",
+    "GeneratedPolicyAnswer",
     "HandoffCreateRequest",
     "HandoffReceipt",
     "HandoffRequest",
@@ -53,8 +56,9 @@ __all__ = [
     "PolicyQuestionRequest",
     "PolicySearchResult",
     "PetSpecies",
-    "GeneratedPolicyAnswer",
     "RoutingAction",
     "RoutingDecision",
     "RoutingLevel",
+    "TurnIntent",
+    "TurnUnderstanding",
 ]
