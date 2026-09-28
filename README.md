@@ -170,6 +170,18 @@ Expected response shape:
 
 If the evidence is weak or missing, the route returns `status: "insufficient_context"` with a safe fallback answer and no citations instead of inventing a policy answer.
 
+## Part 6A: conversation memory foundation
+
+PawLine now includes a minimal internal conversation-memory model for future multi-turn agent work.
+
+- `ConversationState` is one snapshot of what PawLine knows about a single call or conversation.
+- `InMemoryConversationStore` keeps snapshots by conversation ID in the current process only.
+- This store is intentionally process-local for the portfolio: it is not a database and it disappears when PawLine restarts.
+- The future orchestration layer will read a state, perform an action, update it, and save it again.
+- This checkpoint contains no LLM call, no agent decision-making, and no message interpretation.
+
+The state holds the fields that allow a future orchestrator to continue a conversation across multiple caller messages, including the verified customer, selected pet, intake answers, routing decision, appointment selection, booking data, and handoff receipt.
+
 ### Implementation notes
 
 - Policy documents are loaded from the fictional clinic policy Markdown corpus in `knowledge/clinic_policies`.

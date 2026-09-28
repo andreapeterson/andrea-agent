@@ -7,6 +7,7 @@ from .appointment import (
     BookingRequest,
     BookingStatus,
 )
+from .conversation import ConversationMessage, ConversationPhase, ConversationRole, ConversationState
 from .customer import Customer, Pet, PetSpecies
 from .handoff import HandoffCreateRequest, HandoffReceipt, HandoffRequest, HandoffStatus, HandoffSummary
 from .policy import PolicyChunk, PolicyDocument
@@ -31,6 +32,10 @@ __all__ = [
     "BookingConfirmation",
     "BookingRequest",
     "BookingStatus",
+    "ConversationMessage",
+    "ConversationPhase",
+    "ConversationRole",
+    "ConversationState",
     "Customer",
     "EmbeddedPolicyChunk",
     "HandoffCreateRequest",
