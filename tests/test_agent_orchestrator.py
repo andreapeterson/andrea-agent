@@ -134,6 +134,30 @@ async def test_blank_user_message_is_rejected_without_changing_store() -> None:
 
 
 @pytest.mark.asyncio
+async def test_terminal_phase_checks_happen_before_the_interpreter_runs() -> None:
+    store = InMemoryConversationStore()
+    state = store.create("conv-complete")
+    state.phase = ConversationPhase.COMPLETED
+    store.save(state)
+    interpreter = FakeTurnInterpreter()
+    orchestrator = AgentOrchestrator(
+        conversation_store=store,
+        turn_interpreter=interpreter,
+        legacy_crm_client=FakeLegacyCRMClient(None),
+        scheduler_client=FakeSchedulerClient(),
+        handoff_client=FakeHandoffClient(),
+        policy_service=FakePolicyService(),
+        idempotency_key_factory=lambda: "key-1",
+    )
+
+    result = await orchestrator.handle_turn("conv-complete", "This should be ignored.")
+
+    assert interpreter.calls == []
+    assert result.state.phase == ConversationPhase.COMPLETED
+    assert result.assistant_message == "This conversation is already complete."
+
+
+@pytest.mark.asyncio
 async def test_phone_number_triggers_customer_lookup_and_single_pet_autoselect() -> None:
     customer = make_customer(pets=[Pet(pet_id="pet_2001", name="Baxter", species=PetSpecies.DOG)])
     crm = FakeLegacyCRMClient(customer)
@@ -158,6 +182,7 @@ async def test_phone_number_triggers_customer_lookup_and_single_pet_autoselect()
         idempotency_key_factory=lambda: "key-1",
     )
 
+    await orchestrator.start_conversation("conv-1")
     result = await orchestrator.handle_turn("conv-1", "My number is 321-222-2222")
     assert crm.calls == ["321-222-2222"]
     assert result.state.verified_customer is not None
@@ -294,6 +319,7 @@ async def test_same_conversation_turns_are_serialized_by_lock() -> None:
         idempotency_key_factory=lambda: "key-1",
     )
 
+    await orchestrator.start_conversation("conv-lock")
     first = asyncio.create_task(orchestrator.handle_turn("conv-lock", "first message"))
     await asyncio.sleep(0)
     second = asyncio.create_task(orchestrator.handle_turn("conv-lock", "second message"))

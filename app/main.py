@@ -1,6 +1,7 @@
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 
 from app.dependencies import (
+    get_agent_orchestrator,
     get_handoff_client,
     get_legacy_crm_client,
     get_policy_answer_service,
@@ -22,18 +23,62 @@ from app.integrations import (
     SchedulerResponseError,
     SlotNotFoundError,
     SlotUnavailableError,
+    TurnInterpretationRequestError,
+    TurnInterpretationResponseError,
 )
+from app.models.agent_result import AgentTurnResult
 from app.models.appointment import AppointmentSlot, AppointmentType, BookingConfirmation, BookingRequest
+from app.models.conversation import ConversationPhase
+from app.models.conversation_api import ConversationResponse, ConversationTurnRequest, conversation_response_from_result
 from app.models.customer import Customer
 from app.models.handoff import HandoffCreateRequest, HandoffReceipt, HandoffRequest
 from app.models.policy_answer import PolicyAnswerResponse, PolicyQuestionRequest
 from app.models.routing import RoutingAction
-from app.services import PolicyAnswerService
+from app.services import AgentOrchestrator, AgentStateError, AgentToolError, PolicyAnswerService
+from app.services import ConversationNotFoundError
 from app.services.handoff_summary import build_handoff_summary
 from app.services.policy_retriever import PolicyRetrievalError
 from app.services.routing import assess_routing
 
 app = FastAPI(title="PawLine")
+
+
+@app.post("/conversations", response_model=ConversationResponse, status_code=201)
+async def start_conversation_route(
+    orchestrator: AgentOrchestrator | None = Depends(get_agent_orchestrator),
+) -> ConversationResponse:
+    if orchestrator is None:
+        raise HTTPException(status_code=503, detail="agent-service-unavailable")
+
+    try:
+        result = await orchestrator.start_conversation("conversation-" + __import__("uuid").uuid4().hex)
+    except AgentStateError as exc:
+        raise HTTPException(status_code=409, detail="invalid-conversation-state") from exc
+
+    return conversation_response_from_result(result)
+
+
+@app.post("/conversations/{conversation_id}/messages", response_model=ConversationResponse)
+async def send_conversation_message(
+    conversation_id: str,
+    turn_request: ConversationTurnRequest,
+    orchestrator: AgentOrchestrator | None = Depends(get_agent_orchestrator),
+) -> ConversationResponse:
+    if orchestrator is None:
+        raise HTTPException(status_code=503, detail="agent-service-unavailable")
+
+    try:
+        result = await orchestrator.handle_turn(conversation_id, turn_request.message)
+    except ConversationNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="conversation-not-found") from exc
+    except AgentStateError as exc:
+        raise HTTPException(status_code=409, detail="invalid-conversation-state") from exc
+    except (TurnInterpretationRequestError, AgentToolError) as exc:
+        raise HTTPException(status_code=503, detail="agent-service-unavailable") from exc
+    except TurnInterpretationResponseError as exc:
+        raise HTTPException(status_code=502, detail="invalid-agent-understanding") from exc
+
+    return conversation_response_from_result(result)
 
 
 @app.get("/health")

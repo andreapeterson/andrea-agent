@@ -10,6 +10,7 @@ from .appointment import (
     BookingStatus,
 )
 from .conversation import ConversationMessage, ConversationPhase, ConversationRole, ConversationState
+from .conversation_api import ConversationResponse, ConversationTurnRequest, conversation_response_from_result
 from .customer import Customer, Pet, PetSpecies
 from .handoff import HandoffCreateRequest, HandoffReceipt, HandoffRequest, HandoffStatus, HandoffSummary
 from .policy import PolicyChunk, PolicyDocument
@@ -37,8 +38,10 @@ __all__ = [
     "BookingStatus",
     "ConversationMessage",
     "ConversationPhase",
+    "ConversationResponse",
     "ConversationRole",
     "ConversationState",
+    "ConversationTurnRequest",
     "Customer",
     "EmbeddedPolicyChunk",
     "ExtractedIntakeUpdates",
@@ -63,4 +66,5 @@ __all__ = [
     "RoutingLevel",
     "TurnIntent",
     "TurnUnderstanding",
+    "conversation_response_from_result",
 ]

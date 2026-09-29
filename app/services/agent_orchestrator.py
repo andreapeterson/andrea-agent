@@ -275,6 +275,54 @@ class AgentOrchestrator:
         state.phase = ConversationPhase.BOOKING_COMPLETE
         return await self._finalize_turn(state, "Your appointment was confirmed.")
 
+    async def start_conversation(self, conversation_id: str) -> AgentTurnResult:
+        if conversation_id is None or not isinstance(conversation_id, str):
+            raise AgentStateError("conversation_id must be a non-empty string.")
+        normalized_id = conversation_id.strip()
+        if not normalized_id:
+            raise AgentStateError("conversation_id cannot be blank.")
+
+        lock = self._get_lock(normalized_id)
+        async with lock:
+            state = self._conversation_store.create(normalized_id)
+            state.phase = ConversationPhase.VERIFYING_CUSTOMER
+            return await self._finalize_turn(state, "Please provide the caller's phone number.")
+
+    async def _answer_policy_question(
+        self,
+        state: ConversationState,
+        question: str,
+    ) -> AgentTurnResult:
+        try:
+            policy_answer = await self._policy_service.answer(question)
+        except Exception as exc:
+            raise AgentToolError("Policy question handling failed.") from exc
+
+        answer_text = policy_answer.answer.strip()
+        if not answer_text:
+            answer_text = "I’m not able to answer that policy question from the current evidence."
+
+        workflow_message = ""
+        if state.phase == ConversationPhase.VERIFYING_CUSTOMER:
+            workflow_message = "Please provide the caller's phone number."
+        elif state.phase == ConversationPhase.SELECTING_PET:
+            names = ", ".join(pet.name for pet in state.verified_customer.pets) if state.verified_customer else ""
+            workflow_message = f"Which pet are you calling about? {names}" if names else "Which pet are you calling about?"
+        elif state.phase == ConversationPhase.COLLECTING_CONCERN:
+            workflow_message = "Please tell me the pet's concern."
+        elif state.phase == ConversationPhase.COLLECTING_INTAKE:
+            workflow_message = "Please answer the remaining intake questions."
+        elif state.phase == ConversationPhase.SELECTING_APPOINTMENT:
+            workflow_message = self._format_slots(state.offered_slots)
+        elif state.phase == ConversationPhase.CONFIRMING_BOOKING:
+            workflow_message = "Please confirm the appointment by saying yes or no."
+
+        message = answer_text
+        if workflow_message:
+            message = f"{answer_text} {workflow_message}"
+
+        return await self._finalize_turn(state, message, policy_answer=policy_answer)
+
     async def handle_turn(self, conversation_id: str, user_message: str) -> AgentTurnResult:
         if conversation_id is None or not isinstance(conversation_id, str):
             raise AgentStateError("conversation_id must be a non-empty string.")
@@ -290,20 +338,24 @@ class AgentOrchestrator:
 
         lock = self._get_lock(normalized_id)
         async with lock:
-            try:
-                state = self._conversation_store.get(normalized_id)
-            except ConversationNotFoundError:
-                state = self._conversation_store.create(normalized_id)
+            state = self._conversation_store.get(normalized_id)
+
+            if state.phase in {
+                ConversationPhase.HANDOFF_COMPLETE,
+                ConversationPhase.BOOKING_COMPLETE,
+                ConversationPhase.COMPLETED,
+            }:
+                return await self._finalize_turn(state, "This conversation is already complete.")
+
+            if state.phase == ConversationPhase.STARTED:
+                state.phase = ConversationPhase.VERIFYING_CUSTOMER
 
             interpretation = await self._turn_interpreter.interpret(state, cleaned_message)
             state.messages.append(ConversationMessage(role=ConversationRole.USER, content=cleaned_message))
             state.turn_count += 1
 
-            if state.phase in {ConversationPhase.HANDOFF_COMPLETE, ConversationPhase.BOOKING_COMPLETE, ConversationPhase.COMPLETED}:
-                return await self._finalize_turn(state, "This conversation is already complete.")
-
-            if state.phase == ConversationPhase.STARTED:
-                state.phase = ConversationPhase.VERIFYING_CUSTOMER
+            if state.phase == ConversationPhase.VERIFYING_CUSTOMER and interpretation.policy_question and interpretation.policy_question.strip():
+                return await self._answer_policy_question(state, interpretation.policy_question)
 
             if state.phase == ConversationPhase.VERIFYING_CUSTOMER:
                 phone = self._normalize_phone(interpretation.phone_number)
@@ -399,17 +451,7 @@ class AgentOrchestrator:
                     return await self._book_selected_slot(state)
 
             if interpretation.policy_question and interpretation.policy_question.strip():
-                try:
-                    policy_answer = await self._policy_service.answer(interpretation.policy_question)
-                except Exception as exc:
-                    raise AgentToolError("Policy question handling failed.") from exc
-                answer_text = policy_answer.answer.strip()
-                if not answer_text:
-                    answer_text = "I’m not able to answer that policy question from the current evidence."
-                if state.phase in {ConversationPhase.HANDOFF_COMPLETE, ConversationPhase.BOOKING_COMPLETE, ConversationPhase.COMPLETED}:
-                    return await self._finalize_turn(state, answer_text, policy_answer=policy_answer)
-                message = answer_text if not state.messages else answer_text
-                return await self._finalize_turn(state, message, policy_answer=policy_answer)
+                return await self._answer_policy_question(state, interpretation.policy_question)
 
             if state.phase == ConversationPhase.STARTED:
                 state.phase = ConversationPhase.VERIFYING_CUSTOMER
