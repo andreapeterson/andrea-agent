@@ -1,5 +1,11 @@
 """Service layer helpers for PawLine."""
 
+from .agent_orchestrator import (
+    AgentOrchestrationError,
+    AgentOrchestrator,
+    AgentStateError,
+    AgentToolError,
+)
 from .conversation_store import (
     ConversationAlreadyExistsError,
     ConversationNotFoundError,
@@ -19,6 +25,10 @@ from .policy_retriever import (
 from .routing import assess_routing
 
 __all__ = [
+    "AgentOrchestrationError",
+    "AgentOrchestrator",
+    "AgentStateError",
+    "AgentToolError",
     "ConversationAlreadyExistsError",
     "ConversationNotFoundError",
     "ConversationStore",

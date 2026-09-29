@@ -1,5 +1,6 @@
 """Domain models for PawLine."""
 
+from .agent_result import AgentTurnResult
 from .agent_turn import ExtractedIntakeUpdates, TurnIntent, TurnUnderstanding
 from .appointment import (
     AppointmentSlot,
@@ -28,6 +29,7 @@ from .routing import (
 )
 
 __all__ = [
+    "AgentTurnResult",
     "AppointmentSlot",
     "AppointmentType",
     "BookingConfirmation",
