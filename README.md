@@ -170,6 +170,30 @@ Expected response shape:
 
 If the evidence is weak or missing, the route returns `status: "insufficient_context"` with a safe fallback answer and no citations instead of inventing a policy answer.
 
+## Part 6B: single-turn fact extraction
+
+PawLine now includes a minimal turn-understanding layer for converting one natural-language caller message into typed observations.
+
+- The LLM converts natural language into typed facts such as a phone number, pet reference, concern text, intake updates, or appointment selection.
+- It does not make routing or safety decisions, and it does not choose tools or perform workflow actions.
+- `ExtractedIntakeUpdates` represents only what was clearly present in the newest message; `ConversationState` remains the accumulated memory across a conversation.
+- Deterministic orchestration and tool execution are intentionally deferred to future 6C work.
+- The automated tests use mocked structured output rather than real OpenAI calls.
+
+This is a fact-extraction boundary only: the model may interpret a caller message, but it must not mutate `ConversationState`, create a handoff, or book an appointment.
+
+## Part 6A: conversation memory foundation
+
+PawLine now includes a minimal internal conversation-memory model for future multi-turn agent work.
+
+- `ConversationState` is one snapshot of what PawLine knows about a single call or conversation.
+- `InMemoryConversationStore` keeps snapshots by conversation ID in the current process only.
+- This store is intentionally process-local for the portfolio: it is not a database and it disappears when PawLine restarts.
+- The future orchestration layer will read a state, perform an action, update it, and save it again.
+- This checkpoint contains no LLM call, no agent decision-making, and no message interpretation.
+
+The state holds the fields that allow a future orchestrator to continue a conversation across multiple caller messages, including the verified customer, selected pet, intake answers, routing decision, appointment selection, booking data, and handoff receipt.
+
 ### Implementation notes
 
 - Policy documents are loaded from the fictional clinic policy Markdown corpus in `knowledge/clinic_policies`.
