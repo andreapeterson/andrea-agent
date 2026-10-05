@@ -1,5 +1,5 @@
 version = 1
-revision = 3
+revision = 5
 requires-python = ">=3.12"
 resolution-markers = [
     "python_full_version >= '3.14'",
@@ -633,6 +633,7 @@ source = { editable = "." }
 dependencies = [
     { name = "fastapi", extra = ["standard"] },
     { name = "httpx" },
+    { name = "jinja2" },
     { name = "openai" },
     { name = "pydantic" },
     { name = "pyjwt" },
@@ -649,6 +650,7 @@ dev = [
 requires-dist = [
     { name = "fastapi", extras = ["standard"], specifier = ">=0.115.0,<1.0.0" },
     { name = "httpx", specifier = ">=0.27.0,<1.0.0" },
+    { name = "jinja2", specifier = ">=3.1.0,<4.0.0" },
     { name = "openai", specifier = ">=3.19.2" },
     { name = "pydantic", specifier = ">=2.8.0,<3.0.0" },
     { name = "pyjwt", specifier = ">=2.14.0" },
