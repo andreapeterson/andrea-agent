@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 from mock_services.scheduling_api import app, reset_booking_store
 
-TEST_SECRET = "test-scheduler-secret"
+TEST_SECRET = "test-scheduler-secret-at-least-32-bytes"
 
 
 def _token(*, expired: bool = False, bad_signature: bool = False, wrong_issuer: bool = False, wrong_audience: bool = False, wrong_subject: bool = False) -> str:
@@ -26,7 +26,7 @@ def _token(*, expired: bool = False, bad_signature: bool = False, wrong_issuer: 
     if wrong_subject:
         payload["sub"] = "not-the-service"
 
-    signing_secret = TEST_SECRET if not bad_signature else "wrong-secret"
+    signing_secret = TEST_SECRET if not bad_signature else "wrong-scheduler-secret-at-least-32-bytes"
     return jwt.encode(payload, signing_secret, algorithm="HS256")
 
 

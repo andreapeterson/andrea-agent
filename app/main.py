@@ -1,3 +1,5 @@
+import uuid
+
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 
 from app.dependencies import (
@@ -26,7 +28,6 @@ from app.integrations import (
     TurnInterpretationRequestError,
     TurnInterpretationResponseError,
 )
-from app.models.agent_result import AgentTurnResult
 from app.models.appointment import AppointmentSlot, AppointmentType, BookingConfirmation, BookingRequest
 from app.models.conversation import ConversationPhase
 from app.models.conversation_api import ConversationResponse, ConversationTurnRequest, conversation_response_from_result
@@ -34,8 +35,13 @@ from app.models.customer import Customer
 from app.models.handoff import HandoffCreateRequest, HandoffReceipt, HandoffRequest
 from app.models.policy_answer import PolicyAnswerResponse, PolicyQuestionRequest
 from app.models.routing import RoutingAction
-from app.services import AgentOrchestrator, AgentStateError, AgentToolError, PolicyAnswerService
-from app.services import ConversationNotFoundError
+from app.services import (
+    AgentOrchestrator,
+    AgentStateError,
+    AgentToolError,
+    ConversationNotFoundError,
+    PolicyAnswerService,
+)
 from app.services.handoff_summary import build_handoff_summary
 from app.services.policy_retriever import PolicyRetrievalError
 from app.services.routing import assess_routing
@@ -51,7 +57,7 @@ async def start_conversation_route(
         raise HTTPException(status_code=503, detail="agent-service-unavailable")
 
     try:
-        result = await orchestrator.start_conversation("conversation-" + __import__("uuid").uuid4().hex)
+        result = await orchestrator.start_conversation("conversation-" + uuid.uuid4().hex)
     except AgentStateError as exc:
         raise HTTPException(status_code=409, detail="invalid-conversation-state") from exc
 
@@ -73,10 +79,12 @@ async def send_conversation_message(
         raise HTTPException(status_code=404, detail="conversation-not-found") from exc
     except AgentStateError as exc:
         raise HTTPException(status_code=409, detail="invalid-conversation-state") from exc
-    except (TurnInterpretationRequestError, AgentToolError) as exc:
-        raise HTTPException(status_code=503, detail="agent-service-unavailable") from exc
+    except TurnInterpretationRequestError as exc:
+        raise HTTPException(status_code=503, detail="agent-understanding-unavailable") from exc
     except TurnInterpretationResponseError as exc:
         raise HTTPException(status_code=502, detail="invalid-agent-understanding") from exc
+    except AgentToolError as exc:
+        raise HTTPException(status_code=503, detail="agent-tool-unavailable") from exc
 
     return conversation_response_from_result(result)
 

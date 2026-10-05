@@ -10,7 +10,8 @@ from app.models.customer import Customer, Pet, PetSpecies
 from app.models.handoff import HandoffReceipt, HandoffStatus
 from app.models.policy_answer import PolicyAnswerResponse, PolicyAnswerStatus
 from app.models.routing import IntakeAnswers
-from app.services.agent_orchestrator import AgentOrchestrator, AgentStateError
+from app.integrations.scheduler_client import SchedulerRequestError, SlotUnavailableError
+from app.services.agent_orchestrator import AgentOrchestrator, AgentStateError, AgentToolError
 from app.services.conversation_store import ConversationNotFoundError, InMemoryConversationStore
 
 
@@ -299,13 +300,538 @@ async def test_explicit_confirmation_books_with_idempotency_key_saved_before_sch
 
 
 @pytest.mark.asyncio
+async def test_policy_question_during_concern_collection_preserves_phase_and_stored_data() -> None:
+    customer = make_customer(pets=[Pet(pet_id="pet_2001", name="Baxter", species=PetSpecies.DOG)])
+    store = InMemoryConversationStore()
+    state = store.create("conv-policy-concern")
+    state.phase = ConversationPhase.COLLECTING_CONCERN
+    state.verified_customer = customer
+    state.selected_pet_id = "pet_2001"
+    store.save(state)
+    policy = FakePolicyService()
+    orchestrator = AgentOrchestrator(
+        conversation_store=store,
+        turn_interpreter=FakeTurnInterpreter(
+            TurnUnderstanding(
+                intents=[TurnIntent.ASK_POLICY],
+                phone_number=None,
+                pet_reference=None,
+                original_concern=None,
+                intake_updates=ExtractedIntakeUpdates(),
+                policy_question="What is the cancellation policy?",
+                appointment_selection=None,
+                booking_confirmed=None,
+            )
+        ),
+        legacy_crm_client=FakeLegacyCRMClient(customer),
+        scheduler_client=FakeSchedulerClient(),
+        handoff_client=FakeHandoffClient(),
+        policy_service=policy,
+        idempotency_key_factory=lambda: "key-1",
+    )
+
+    result = await orchestrator.handle_turn("conv-policy-concern", "Can I cancel my appointment?")
+
+    assert result.state.phase == ConversationPhase.COLLECTING_CONCERN
+    assert result.state.verified_customer == customer
+    assert result.state.selected_pet_id == "pet_2001"
+    assert result.state.original_concern is None
+    assert result.assistant_message == (
+        "The clinic allows cancellations with notice. Please tell me the pet's concern."
+    )
+    assert policy.calls == ["What is the cancellation policy?"]
+
+
+@pytest.mark.parametrize(
+    ("phase", "expected_prompt"),
+    [
+        (ConversationPhase.SELECTING_PET, "Which pet are you calling about? Baxter"),
+        (ConversationPhase.COLLECTING_INTAKE, "Is there uncontrolled bleeding?"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_policy_question_preserves_pet_selection_and_intake_phases(
+    phase: ConversationPhase,
+    expected_prompt: str,
+) -> None:
+    customer = make_customer(pets=[Pet(pet_id="pet_2001", name="Baxter", species=PetSpecies.DOG)])
+    store = InMemoryConversationStore()
+    state = store.create(f"conv-policy-{phase.value}")
+    state.phase = phase
+    state.verified_customer = customer
+    if phase == ConversationPhase.COLLECTING_INTAKE:
+        state.selected_pet_id = "pet_2001"
+        state.original_concern = "Baxter is unwell."
+        state.intake_answers.difficulty_breathing = False
+    store.save(state)
+    policy = FakePolicyService()
+    orchestrator = AgentOrchestrator(
+        conversation_store=store,
+        turn_interpreter=FakeTurnInterpreter(
+            TurnUnderstanding(
+                intents=[TurnIntent.ASK_POLICY],
+                phone_number=None,
+                pet_reference=None,
+                original_concern=None,
+                intake_updates=ExtractedIntakeUpdates(),
+                policy_question="What is the cancellation policy?",
+                appointment_selection=None,
+                booking_confirmed=None,
+            )
+        ),
+        legacy_crm_client=FakeLegacyCRMClient(customer),
+        scheduler_client=FakeSchedulerClient(),
+        handoff_client=FakeHandoffClient(),
+        policy_service=policy,
+        idempotency_key_factory=lambda: "key-1",
+    )
+
+    result = await orchestrator.handle_turn(state.conversation_id, "Can I cancel my appointment?")
+
+    assert result.state.phase == phase
+    assert expected_prompt in result.assistant_message
+    assert policy.calls == ["What is the cancellation policy?"]
+    if phase == ConversationPhase.COLLECTING_INTAKE:
+        assert result.state.intake_answers.difficulty_breathing is False
+        assert result.state.routing_decision is not None
+        assert result.state.routing_decision.missing_fields[0] == "uncontrolled_bleeding"
+
+
+@pytest.mark.asyncio
+async def test_policy_question_during_selecting_appointment_preserves_slots_and_state() -> None:
+    customer = make_customer(pets=[Pet(pet_id="pet_2001", name="Baxter", species=PetSpecies.DOG)])
+    store = InMemoryConversationStore()
+    state = store.create("conv-policy-slots")
+    state.phase = ConversationPhase.SELECTING_APPOINTMENT
+    state.verified_customer = customer
+    state.selected_pet_id = "pet_2001"
+    state.original_concern = "Baxter is weak."
+    state.intake_answers = IntakeAnswers(
+        difficulty_breathing=False,
+        uncontrolled_bleeding=False,
+        collapsed_or_unresponsive=False,
+        known_toxin_exposure=False,
+        rapidly_worsening=False,
+    )
+    state.offered_slots = [
+        AppointmentSlot(
+            slot_id="slot-1",
+            clinic_id="clinic-1",
+            starts_at=datetime(2026, 9, 28, 9, 0),
+            ends_at=datetime(2026, 9, 28, 9, 30),
+            appointment_type=AppointmentType.ROUTINE,
+        )
+    ]
+    state.selected_slot_id = "slot-1"
+    state.booking_idempotency_key = "persisted-key"
+    store.save(state)
+    orchestrator = AgentOrchestrator(
+        conversation_store=store,
+        turn_interpreter=FakeTurnInterpreter(
+            TurnUnderstanding(
+                intents=[TurnIntent.ASK_POLICY],
+                phone_number=None,
+                pet_reference=None,
+                original_concern=None,
+                intake_updates=ExtractedIntakeUpdates(),
+                policy_question="What is the cancellation policy?",
+                appointment_selection=None,
+                booking_confirmed=None,
+            )
+        ),
+        legacy_crm_client=FakeLegacyCRMClient(customer),
+        scheduler_client=FakeSchedulerClient(),
+        handoff_client=FakeHandoffClient(),
+        policy_service=FakePolicyService(),
+        idempotency_key_factory=lambda: "new-key",
+    )
+
+    result = await orchestrator.handle_turn("conv-policy-slots", "Can I cancel my appointment?")
+
+    assert result.state.phase == ConversationPhase.SELECTING_APPOINTMENT
+    assert result.state.verified_customer == customer
+    assert result.state.selected_pet_id == "pet_2001"
+    assert result.state.original_concern == "Baxter is weak."
+    assert result.state.intake_answers == state.intake_answers
+    assert result.state.offered_slots == state.offered_slots
+    assert result.state.selected_slot_id == "slot-1"
+    assert result.state.booking_idempotency_key == "persisted-key"
+    assert "slot-1" in result.assistant_message
+
+
+@pytest.mark.asyncio
+async def test_policy_question_during_booking_confirmation_does_not_book() -> None:
+    customer = make_customer(pets=[Pet(pet_id="pet_2001", name="Baxter", species=PetSpecies.DOG)])
+    store = InMemoryConversationStore()
+    state = store.create("conv-policy-confirm")
+    state.phase = ConversationPhase.CONFIRMING_BOOKING
+    state.verified_customer = customer
+    state.selected_pet_id = "pet_2001"
+    state.selected_slot_id = "slot-1"
+    store.save(state)
+    scheduler = FakeSchedulerClient()
+    orchestrator = AgentOrchestrator(
+        conversation_store=store,
+        turn_interpreter=FakeTurnInterpreter(
+            TurnUnderstanding(
+                intents=[TurnIntent.ASK_POLICY, TurnIntent.CONFIRM_BOOKING],
+                phone_number=None,
+                pet_reference=None,
+                original_concern=None,
+                intake_updates=ExtractedIntakeUpdates(),
+                policy_question="What is the cancellation policy?",
+                appointment_selection=None,
+                booking_confirmed=True,
+            )
+        ),
+        legacy_crm_client=FakeLegacyCRMClient(customer),
+        scheduler_client=scheduler,
+        handoff_client=FakeHandoffClient(),
+        policy_service=FakePolicyService(),
+        idempotency_key_factory=lambda: "key-1",
+    )
+
+    result = await orchestrator.handle_turn("conv-policy-confirm", "Can I cancel my appointment?")
+
+    assert result.state.phase == ConversationPhase.CONFIRMING_BOOKING
+    assert result.state.selected_slot_id == "slot-1"
+    assert scheduler.book_calls == []
+
+
+@pytest.mark.asyncio
+async def test_urgent_intake_answer_wins_over_policy_question() -> None:
+    customer = make_customer(pets=[Pet(pet_id="pet_2001", name="Baxter", species=PetSpecies.DOG)])
+    store = InMemoryConversationStore()
+    state = store.create("conv-policy-urgent")
+    state.phase = ConversationPhase.COLLECTING_INTAKE
+    state.verified_customer = customer
+    state.selected_pet_id = "pet_2001"
+    state.original_concern = "Baxter is having trouble breathing."
+    store.save(state)
+    policy = FakePolicyService()
+    scheduler = FakeSchedulerClient()
+    handoff = FakeHandoffClient()
+    orchestrator = AgentOrchestrator(
+        conversation_store=store,
+        turn_interpreter=FakeTurnInterpreter(
+            TurnUnderstanding(
+                intents=[TurnIntent.ANSWER_INTAKE, TurnIntent.ASK_POLICY],
+                phone_number=None,
+                pet_reference=None,
+                original_concern=None,
+                intake_updates=ExtractedIntakeUpdates(difficulty_breathing=True),
+                policy_question="What is the cancellation policy?",
+                appointment_selection=None,
+                booking_confirmed=None,
+            )
+        ),
+        legacy_crm_client=FakeLegacyCRMClient(customer),
+        scheduler_client=scheduler,
+        handoff_client=handoff,
+        policy_service=policy,
+        idempotency_key_factory=lambda: "key-1",
+    )
+
+    result = await orchestrator.handle_turn("conv-policy-urgent", "He is having trouble breathing. Also, can I cancel?")
+
+    assert result.state.phase == ConversationPhase.HANDOFF_COMPLETE
+    assert result.state.intake_answers.difficulty_breathing is True
+    assert len(handoff.requests) == 1
+    assert policy.calls == []
+    assert scheduler.slot_calls == []
+
+
+@pytest.mark.asyncio
+async def test_extracted_none_does_not_erase_stored_false_intake_answer() -> None:
+    store = InMemoryConversationStore()
+    state = store.create("conv-intake-merge")
+    state.phase = ConversationPhase.COLLECTING_INTAKE
+    state.intake_answers.difficulty_breathing = False
+    store.save(state)
+    orchestrator = AgentOrchestrator(
+        conversation_store=store,
+        turn_interpreter=FakeTurnInterpreter(
+            TurnUnderstanding(
+                intents=[TurnIntent.ANSWER_INTAKE],
+                phone_number=None,
+                pet_reference=None,
+                original_concern=None,
+                intake_updates=ExtractedIntakeUpdates(difficulty_breathing=None),
+                policy_question=None,
+                appointment_selection=None,
+                booking_confirmed=None,
+            )
+        ),
+        legacy_crm_client=FakeLegacyCRMClient(None),
+        scheduler_client=FakeSchedulerClient(),
+        handoff_client=FakeHandoffClient(),
+        policy_service=FakePolicyService(),
+        idempotency_key_factory=lambda: "key-1",
+    )
+
+    result = await orchestrator.handle_turn("conv-intake-merge", "I am not sure about the rest.")
+
+    assert result.state.intake_answers.difficulty_breathing is False
+
+
+@pytest.mark.asyncio
+async def test_booking_confirmation_outside_confirmation_phase_does_not_book() -> None:
+    store = InMemoryConversationStore()
+    state = store.create("conv-wrong-phase-booking")
+    state.phase = ConversationPhase.COLLECTING_CONCERN
+    store.save(state)
+    scheduler = FakeSchedulerClient()
+    orchestrator = AgentOrchestrator(
+        conversation_store=store,
+        turn_interpreter=FakeTurnInterpreter(
+            TurnUnderstanding(
+                intents=[TurnIntent.CONFIRM_BOOKING],
+                phone_number=None,
+                pet_reference=None,
+                original_concern=None,
+                intake_updates=ExtractedIntakeUpdates(),
+                policy_question=None,
+                appointment_selection=None,
+                booking_confirmed=True,
+            )
+        ),
+        legacy_crm_client=FakeLegacyCRMClient(None),
+        scheduler_client=scheduler,
+        handoff_client=FakeHandoffClient(),
+        policy_service=FakePolicyService(),
+        idempotency_key_factory=lambda: "key-1",
+    )
+
+    result = await orchestrator.handle_turn("conv-wrong-phase-booking", "Yes, book it.")
+
+    assert result.state.phase == ConversationPhase.COLLECTING_CONCERN
+    assert scheduler.book_calls == []
+
+
+@pytest.mark.asyncio
+async def test_booking_retry_reuses_persisted_idempotency_key_after_uncertain_failure() -> None:
+    customer = make_customer(pets=[Pet(pet_id="pet_2001", name="Baxter", species=PetSpecies.DOG)])
+    store = InMemoryConversationStore()
+    state = store.create("conv-booking-retry")
+    state.phase = ConversationPhase.CONFIRMING_BOOKING
+    state.verified_customer = customer
+    state.selected_pet_id = "pet_2001"
+    state.selected_slot_id = "slot-1"
+    store.save(state)
+
+    class FlakyScheduler(FakeSchedulerClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self.idempotency_keys: list[str] = []
+
+        async def book_appointment(self, booking_request: BookingRequest, idempotency_key: str) -> BookingConfirmation:
+            assert store.get("conv-booking-retry").booking_idempotency_key == idempotency_key
+            self.idempotency_keys.append(idempotency_key)
+            if len(self.idempotency_keys) == 1:
+                raise SchedulerRequestError("uncertain scheduler failure")
+            return await super().book_appointment(booking_request, idempotency_key)
+
+    scheduler = FlakyScheduler()
+    key_calls: list[str] = []
+
+    def key_factory() -> str:
+        generated = f"key-{len(key_calls) + 1}"
+        key_calls.append(generated)
+        return generated
+
+    interpreter = FakeTurnInterpreter(
+        TurnUnderstanding(
+            intents=[TurnIntent.CONFIRM_BOOKING],
+            phone_number=None,
+            pet_reference=None,
+            original_concern=None,
+            intake_updates=ExtractedIntakeUpdates(),
+            policy_question=None,
+            appointment_selection=None,
+            booking_confirmed=True,
+        )
+    )
+    orchestrator = AgentOrchestrator(
+        conversation_store=store,
+        turn_interpreter=interpreter,
+        legacy_crm_client=FakeLegacyCRMClient(customer),
+        scheduler_client=scheduler,
+        handoff_client=FakeHandoffClient(),
+        policy_service=FakePolicyService(),
+        idempotency_key_factory=key_factory,
+    )
+
+    with pytest.raises(AgentToolError):
+        await orchestrator.handle_turn("conv-booking-retry", "Yes, book it.")
+
+    failed_state = store.get("conv-booking-retry")
+    assert failed_state.phase == ConversationPhase.CONFIRMING_BOOKING
+    assert failed_state.booking_idempotency_key == "key-1"
+
+    result = await orchestrator.handle_turn("conv-booking-retry", "Yes, book it.")
+
+    assert result.state.phase == ConversationPhase.BOOKING_COMPLETE
+    assert scheduler.idempotency_keys == ["key-1", "key-1"]
+    assert key_calls == ["key-1"]
+
+
+@pytest.mark.asyncio
+async def test_disappeared_slot_refreshes_options_without_auto_selecting() -> None:
+    customer = make_customer(pets=[Pet(pet_id="pet_2001", name="Baxter", species=PetSpecies.DOG)])
+    old_slot = AppointmentSlot(
+        slot_id="slot-old",
+        clinic_id="clinic-1",
+        starts_at=datetime(2026, 9, 28, 9, 0),
+        ends_at=datetime(2026, 9, 28, 9, 30),
+        appointment_type=AppointmentType.SAME_DAY,
+    )
+    fresh_slot = AppointmentSlot(
+        slot_id="slot-fresh",
+        clinic_id="clinic-1",
+        starts_at=datetime(2026, 9, 28, 10, 0),
+        ends_at=datetime(2026, 9, 28, 10, 30),
+        appointment_type=AppointmentType.SAME_DAY,
+    )
+    store = InMemoryConversationStore()
+    state = store.create("conv-disappeared-slot")
+    state.phase = ConversationPhase.CONFIRMING_BOOKING
+    state.verified_customer = customer
+    state.selected_pet_id = "pet_2001"
+    state.appointment_type = AppointmentType.SAME_DAY
+    state.offered_slots = [old_slot]
+    state.selected_slot_id = old_slot.slot_id
+    state.booking_idempotency_key = "old-idempotency-key"
+    store.save(state)
+
+    class DisappearingScheduler(FakeSchedulerClient):
+        def __init__(self) -> None:
+            super().__init__(slots=[fresh_slot])
+            self.booked_slot_ids: list[str] = []
+
+        async def book_appointment(self, booking_request: BookingRequest, idempotency_key: str) -> BookingConfirmation:
+            self.booked_slot_ids.append(booking_request.slot_id)
+            raise SlotUnavailableError("slot unavailable")
+
+    scheduler = DisappearingScheduler()
+    orchestrator = AgentOrchestrator(
+        conversation_store=store,
+        turn_interpreter=FakeTurnInterpreter(
+            TurnUnderstanding(
+                intents=[TurnIntent.CONFIRM_BOOKING],
+                phone_number=None,
+                pet_reference=None,
+                original_concern=None,
+                intake_updates=ExtractedIntakeUpdates(),
+                policy_question=None,
+                appointment_selection=None,
+                booking_confirmed=True,
+            )
+        ),
+        legacy_crm_client=FakeLegacyCRMClient(customer),
+        scheduler_client=scheduler,
+        handoff_client=FakeHandoffClient(),
+        policy_service=FakePolicyService(),
+        idempotency_key_factory=lambda: "new-idempotency-key",
+    )
+
+    result = await orchestrator.handle_turn("conv-disappeared-slot", "Yes, book it.")
+
+    assert scheduler.booked_slot_ids == ["slot-old"]
+    assert scheduler.slot_calls == [("pet_2001", AppointmentType.SAME_DAY)]
+    assert result.state.phase == ConversationPhase.SELECTING_APPOINTMENT
+    assert result.state.selected_slot_id is None
+    assert result.state.booking_idempotency_key is None
+    assert result.state.offered_slots == [fresh_slot]
+    assert "slot-fresh" in result.assistant_message
+
+
+@pytest.mark.asyncio
+async def test_slot_refresh_failure_is_wrapped_as_agent_tool_error() -> None:
+    customer = make_customer(pets=[Pet(pet_id="pet_2001", name="Baxter", species=PetSpecies.DOG)])
+    store = InMemoryConversationStore()
+    state = store.create("conv-refresh-failure")
+    state.phase = ConversationPhase.CONFIRMING_BOOKING
+    state.verified_customer = customer
+    state.selected_pet_id = "pet_2001"
+    state.appointment_type = AppointmentType.SAME_DAY
+    state.selected_slot_id = "slot-old"
+    store.save(state)
+
+    class RefreshFailureScheduler(FakeSchedulerClient):
+        async def book_appointment(self, booking_request: BookingRequest, idempotency_key: str) -> BookingConfirmation:
+            raise SlotUnavailableError("slot unavailable")
+
+        async def find_slots(self, pet_id: str, appointment_type: AppointmentType) -> list[AppointmentSlot]:
+            raise SchedulerRequestError("refresh failed")
+
+    orchestrator = AgentOrchestrator(
+        conversation_store=store,
+        turn_interpreter=FakeTurnInterpreter(
+            TurnUnderstanding(
+                intents=[TurnIntent.CONFIRM_BOOKING],
+                phone_number=None,
+                pet_reference=None,
+                original_concern=None,
+                intake_updates=ExtractedIntakeUpdates(),
+                policy_question=None,
+                appointment_selection=None,
+                booking_confirmed=True,
+            )
+        ),
+        legacy_crm_client=FakeLegacyCRMClient(customer),
+        scheduler_client=RefreshFailureScheduler(),
+        handoff_client=FakeHandoffClient(),
+        policy_service=FakePolicyService(),
+        idempotency_key_factory=lambda: "key-1",
+    )
+
+    with pytest.raises(AgentToolError, match="slot refresh"):
+        await orchestrator.handle_turn("conv-refresh-failure", "Yes, book it.")
+
+
+@pytest.mark.asyncio
+async def test_different_conversation_ids_can_interpret_concurrently() -> None:
+    store = InMemoryConversationStore()
+    entered = {"conv-a": asyncio.Event(), "conv-b": asyncio.Event()}
+    release = asyncio.Event()
+
+    class ConcurrentInterpreter(FakeTurnInterpreter):
+        async def interpret(self, state: ConversationState, user_message: str) -> TurnUnderstanding:
+            entered[state.conversation_id].set()
+            await release.wait()
+            return await super().interpret(state, user_message)
+
+    orchestrator = AgentOrchestrator(
+        conversation_store=store,
+        turn_interpreter=ConcurrentInterpreter(),
+        legacy_crm_client=FakeLegacyCRMClient(None),
+        scheduler_client=FakeSchedulerClient(),
+        handoff_client=FakeHandoffClient(),
+        policy_service=FakePolicyService(),
+        idempotency_key_factory=lambda: "key-1",
+    )
+    await orchestrator.start_conversation("conv-a")
+    await orchestrator.start_conversation("conv-b")
+
+    first = asyncio.create_task(orchestrator.handle_turn("conv-a", "first"))
+    second = asyncio.create_task(orchestrator.handle_turn("conv-b", "second"))
+    await asyncio.wait_for(asyncio.gather(*(event.wait() for event in entered.values())), timeout=1)
+    release.set()
+    await asyncio.gather(first, second)
+
+
+@pytest.mark.asyncio
 async def test_same_conversation_turns_are_serialized_by_lock() -> None:
     store = InMemoryConversationStore()
-    event = asyncio.Event()
+    first_interpreter_entered = asyncio.Event()
+    second_turn_started = asyncio.Event()
+    release_first_turn = asyncio.Event()
 
     class BlockingInterpreter(FakeTurnInterpreter):
         async def interpret(self, state: ConversationState, user_message: str):
-            await event.wait()
+            if user_message == "first message":
+                first_interpreter_entered.set()
+                await release_first_turn.wait()
             return await super().interpret(state, user_message)
 
     interpreter = BlockingInterpreter()
@@ -321,9 +847,15 @@ async def test_same_conversation_turns_are_serialized_by_lock() -> None:
 
     await orchestrator.start_conversation("conv-lock")
     first = asyncio.create_task(orchestrator.handle_turn("conv-lock", "first message"))
-    await asyncio.sleep(0)
-    second = asyncio.create_task(orchestrator.handle_turn("conv-lock", "second message"))
+    await first_interpreter_entered.wait()
+
+    async def send_second_turn() -> None:
+        second_turn_started.set()
+        await orchestrator.handle_turn("conv-lock", "second message")
+
+    second = asyncio.create_task(send_second_turn())
+    await second_turn_started.wait()
     assert not second.done()
-    event.set()
+    release_first_turn.set()
     await asyncio.gather(first, second)
     assert store.get("conv-lock").turn_count == 2

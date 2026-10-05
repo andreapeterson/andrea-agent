@@ -19,7 +19,7 @@ uv run pytest -q
 Terminal 1: PawLine app
 
 ```bash
-LEGACY_CRM_BASE_URL=http://127.0.0.1:8001 LEGACY_CRM_API_KEY=dev-crm-key SCHEDULER_BASE_URL=http://127.0.0.1:8002 SCHEDULER_JWT_SECRET=dev-scheduler-secret HANDOFF_BASE_URL=http://127.0.0.1:8003 HANDOFF_WEBHOOK_SECRET=dev-handoff-secret uv run uvicorn app.main:app --reload --port 8000
+LEGACY_CRM_BASE_URL=http://127.0.0.1:8001 LEGACY_CRM_API_KEY=dev-crm-key SCHEDULER_BASE_URL=http://127.0.0.1:8002 SCHEDULER_JWT_SECRET=dev-scheduler-secret-at-least-32-bytes HANDOFF_BASE_URL=http://127.0.0.1:8003 HANDOFF_WEBHOOK_SECRET=dev-handoff-secret uv run uvicorn app.main:app --reload --port 8000
 ```
 
 Terminal 2: mock CRM service
@@ -31,7 +31,7 @@ MOCK_CRM_API_KEY=dev-crm-key uv run uvicorn mock_services.legacy_crm_api:app --r
 Terminal 3: mock scheduling service
 
 ```bash
-MOCK_SCHEDULER_JWT_SECRET=dev-scheduler-secret uv run uvicorn mock_services.scheduling_api:app --reload --port 8002
+MOCK_SCHEDULER_JWT_SECRET=dev-scheduler-secret-at-least-32-bytes uv run uvicorn mock_services.scheduling_api:app --reload --port 8002
 ```
 
 Terminal 4: mock handoff service

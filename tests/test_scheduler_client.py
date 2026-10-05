@@ -13,7 +13,7 @@ from app.integrations import (
 )
 from app.models.appointment import AppointmentSlot, AppointmentType, BookingConfirmation, BookingRequest, BookingStatus
 
-TEST_SECRET = "test-scheduler-secret"
+TEST_SECRET = "test-scheduler-secret-at-least-32-bytes"
 
 
 def _decode_token(token: str) -> dict:

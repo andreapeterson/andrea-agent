@@ -17,7 +17,7 @@ from app.models.appointment import (
 app = FastAPI(title="Mock Scheduling API")
 security = HTTPBearer(auto_error=False)
 
-TEST_SECRET = "dev-scheduler-secret"
+TEST_SECRET = "dev-scheduler-secret-at-least-32-bytes"
 
 
 class BookingStore:

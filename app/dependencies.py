@@ -13,8 +13,8 @@ from app.integrations import (
     OpenAIPolicyAnswerGenerator,
     SchedulerClient,
 )
-from app.services import AgentOrchestrator, InMemoryConversationStore, PolicyAnswerService
 from app.integrations.turn_interpreter import OpenAITurnInterpreter
+from app.services import AgentOrchestrator, InMemoryConversationStore, PolicyAnswerService
 from app.services.policy_loader import load_policy_chunks
 from app.services.policy_retriever import PolicyRetriever
 

@@ -16,10 +16,10 @@ from app.integrations.scheduler_client import (
 from app.integrations.turn_interpreter import TurnInterpreter
 from app.models.agent_result import AgentTurnResult
 from app.models.agent_turn import ExtractedIntakeUpdates, TurnUnderstanding
-from app.models.appointment import AppointmentSlot, AppointmentType, BookingRequest
+from app.models.appointment import AppointmentSlot, AppointmentType, BookingConfirmation, BookingRequest
 from app.models.conversation import ConversationMessage, ConversationPhase, ConversationRole, ConversationState
-from app.models.customer import Customer
-from app.models.handoff import HandoffRequest
+from app.models.customer import Customer, Pet
+from app.models.handoff import HandoffReceipt, HandoffRequest
 from app.models.policy_answer import PolicyAnswerResponse
 from app.models.routing import RoutingAction, RoutingDecision
 from app.services.conversation_store import ConversationNotFoundError, ConversationStore
@@ -45,11 +45,15 @@ class LegacyCRMClientProtocol(Protocol):
 
 class SchedulerClientProtocol(Protocol):
     async def find_slots(self, pet_id: str, appointment_type: AppointmentType) -> list[AppointmentSlot]: ...
-    async def book_appointment(self, booking_request: BookingRequest, idempotency_key: str) -> object: ...
+    async def book_appointment(
+        self,
+        booking_request: BookingRequest,
+        idempotency_key: str,
+    ) -> BookingConfirmation: ...
 
 
 class HandoffClientProtocol(Protocol):
-    async def create_handoff(self, handoff_request: HandoffRequest) -> object: ...
+    async def create_handoff(self, handoff_request: HandoffRequest) -> HandoffReceipt: ...
 
 
 class PolicyAnswerServiceProtocol(Protocol):
@@ -119,7 +123,7 @@ class AgentOrchestrator:
         phone = value.strip()
         return phone or None
 
-    def _resolve_pet(self, state: ConversationState, pet_reference: str | None) -> object | None:
+    def _resolve_pet(self, state: ConversationState, pet_reference: str | None) -> Pet | None:
         if state.verified_customer is None:
             return None
         if not pet_reference or not pet_reference.strip():
@@ -236,32 +240,27 @@ class AgentOrchestrator:
                 booking_request=booking_request,
                 idempotency_key=state.booking_idempotency_key,
             )
-        except SlotUnavailableError as exc:
+        except (SlotUnavailableError, SlotNotFoundError):
             state.selected_slot_id = None
             state.booking_idempotency_key = None
-            refreshed = await self._scheduler_client.find_slots(
-                pet_id=state.selected_pet_id,
-                appointment_type=state.appointment_type,
-            )
+            state.offered_slots = []
+            state.phase = ConversationPhase.SELECTING_APPOINTMENT
+            self._conversation_store.save(state)
+            try:
+                refreshed = await self._scheduler_client.find_slots(
+                    pet_id=state.selected_pet_id,
+                    appointment_type=state.appointment_type,
+                )
+            except (SchedulerRequestError, RuntimeError) as exc:
+                raise AgentToolError("Scheduler slot refresh failed.") from exc
             state.offered_slots = refreshed
             if refreshed:
-                state.phase = ConversationPhase.SELECTING_APPOINTMENT
-                return await self._finalize_turn(state, "The selected slot is no longer available. Please choose another option.")
+                return await self._finalize_turn(
+                    state,
+                    "The selected slot is no longer available. " + self._format_slots(refreshed),
+                )
             state.phase = ConversationPhase.COMPLETED
             return await self._finalize_turn(state, "The selected slot disappeared and no alternatives are currently available.")
-        except SlotNotFoundError as exc:
-            state.selected_slot_id = None
-            state.booking_idempotency_key = None
-            refreshed = await self._scheduler_client.find_slots(
-                pet_id=state.selected_pet_id,
-                appointment_type=state.appointment_type,
-            )
-            state.offered_slots = refreshed
-            if refreshed:
-                state.phase = ConversationPhase.SELECTING_APPOINTMENT
-                return await self._finalize_turn(state, "That slot is no longer available. Please choose another option.")
-            state.phase = ConversationPhase.COMPLETED
-            return await self._finalize_turn(state, "The selected slot was unavailable and no alternatives are available.")
         except IdempotencyConflictError as exc:
             raise AgentStateError("Booking idempotency key conflict indicates an internal invariant problem.") from exc
         except SchedulerRequestError as exc:
@@ -311,7 +310,11 @@ class AgentOrchestrator:
         elif state.phase == ConversationPhase.COLLECTING_CONCERN:
             workflow_message = "Please tell me the pet's concern."
         elif state.phase == ConversationPhase.COLLECTING_INTAKE:
-            workflow_message = "Please answer the remaining intake questions."
+            missing_fields = state.routing_decision.missing_fields if state.routing_decision is not None else []
+            if missing_fields:
+                workflow_message = self._intake_question_for(missing_fields[0])
+            else:
+                workflow_message = "PawLine is ready to continue the intake workflow."
         elif state.phase == ConversationPhase.SELECTING_APPOINTMENT:
             workflow_message = self._format_slots(state.offered_slots)
         elif state.phase == ConversationPhase.CONFIRMING_BOOKING:
@@ -354,7 +357,15 @@ class AgentOrchestrator:
             state.messages.append(ConversationMessage(role=ConversationRole.USER, content=cleaned_message))
             state.turn_count += 1
 
-            if state.phase == ConversationPhase.VERIFYING_CUSTOMER and interpretation.policy_question and interpretation.policy_question.strip():
+            if state.phase == ConversationPhase.COLLECTING_INTAKE:
+                self._merge_intake_updates(state, interpretation.intake_updates)
+                decision = assess_routing(state.intake_answers)
+                state.routing_decision = decision
+
+                if decision.next_action == RoutingAction.CREATE_HANDOFF:
+                    return await self._create_handoff(state)
+
+            if interpretation.policy_question and interpretation.policy_question.strip():
                 return await self._answer_policy_question(state, interpretation.policy_question)
 
             if state.phase == ConversationPhase.VERIFYING_CUSTOMER:
@@ -402,9 +413,9 @@ class AgentOrchestrator:
                 return await self._finalize_turn(state, "I have the concern. I need a few quick intake questions.")
 
             if state.phase == ConversationPhase.COLLECTING_INTAKE:
-                self._merge_intake_updates(state, interpretation.intake_updates)
-                decision = assess_routing(state.intake_answers)
-                state.routing_decision = decision
+                decision = state.routing_decision
+                if decision is None:
+                    raise AgentStateError("Intake routing decision is required during intake collection.")
 
                 if decision.next_action == RoutingAction.CREATE_HANDOFF:
                     return await self._create_handoff(state)
@@ -449,12 +460,5 @@ class AgentOrchestrator:
                     if state.selected_slot_id is None:
                         raise AgentStateError("Selected slot is required before booking.")
                     return await self._book_selected_slot(state)
-
-            if interpretation.policy_question and interpretation.policy_question.strip():
-                return await self._answer_policy_question(state, interpretation.policy_question)
-
-            if state.phase == ConversationPhase.STARTED:
-                state.phase = ConversationPhase.VERIFYING_CUSTOMER
-                return await self._finalize_turn(state, "Please provide the caller's phone number.")
 
             return await self._finalize_turn(state, "I’m ready to continue.")
