@@ -10,6 +10,7 @@ from .prompt_context import PromptContext
 
 # This identifies the exact instructions used for an LLM call, like a version number for application code.
 FRONT_DESK_PROMPT_VERSION = "front-desk-v1"
+ROUTER_PROMPT_VERSION = "router-v1"
 # Templates live beside this module so their instructions can be reviewed and versioned with the code.
 DEFAULT_TEMPLATE_DIRECTORY = Path(__file__).resolve().parent.parent / "prompts"
 
@@ -66,5 +67,32 @@ class PromptRenderer:
                 f"Unable to render prompt version '{self.prompt_version}'."
             ) from exc
 
+    def render_router(self, context: PromptContext, user_message: str) -> str:
+        """Render router instructions from allowlisted context and the caller message.
 
-__all__ = ["FRONT_DESK_PROMPT_VERSION", "PromptRenderer", "PromptRenderingError"]
+        The context contains only conversation facts needed for routing. This
+        method returns prompt text; it does not select a destination or execute a
+        specialist.
+        """
+        if not user_message or not user_message.strip():
+            raise PromptRenderingError("User message cannot be blank.")
+
+        template_values = context.model_dump(mode="json")
+        template_values["prompt_version"] = ROUTER_PROMPT_VERSION
+        template_values["user_message"] = user_message.strip()
+
+        try:
+            template = self._environment.get_template("router.md.j2")
+            return template.render(**template_values)
+        except (OSError, TemplateError) as exc:
+            raise PromptRenderingError(
+                f"Unable to render prompt version '{ROUTER_PROMPT_VERSION}'."
+            ) from exc
+
+
+__all__ = [
+    "FRONT_DESK_PROMPT_VERSION",
+    "ROUTER_PROMPT_VERSION",
+    "PromptRenderer",
+    "PromptRenderingError",
+]
