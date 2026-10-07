@@ -1,4 +1,4 @@
-"""Route one caller message to the appropriate specialist without answering it."""
+"""Use an LLM to choose which specialist should receive one caller message."""
 
 from __future__ import annotations
 
