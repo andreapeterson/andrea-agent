@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 from types import SimpleNamespace
 from typing import cast
+from unittest.mock import Mock
 
 import pytest
 
@@ -22,6 +24,7 @@ from app.agents.router_agent import RouterResponseError
 from app.agents.router_handoff import SpecialistNotAvailableError, route_and_respond
 from app.agents.verification_agent import VerificationAgent
 from app.models.customer import Customer, Pet, PetSpecies
+from app.services.conversation_store import InMemoryConversationStore
 
 
 class FakeLegacyCRMClient:
@@ -104,6 +107,9 @@ def function_call(call_id: str = "call-customer-1", phone: str = "321-555-0100")
 
 @pytest.mark.asyncio
 async def test_router_destination_verification_invokes_verification_agent() -> None:
+    store = InMemoryConversationStore()
+    state = store.create("conv-test")
+    store.save = Mock(wraps=store.save)
     router_client = FakeOpenAIClient(
         FakeOpenAIResponses(parsed=RouteDecision(destination="verification", reason="Caller supplied a phone number."))
     )
@@ -122,11 +128,16 @@ async def test_router_destination_verification_invokes_verification_agent() -> N
         )
     )
     crm_client = FakeLegacyCRMClient(result=make_customer())
+    lookup_customer_handler = create_lookup_customer_handler(
+        crm_client,
+        conversation_state=state,
+        conversation_store=store,
+    )
     agent = VerificationAgent(
         client=verification_client,
         model="verification-model",
         prompt_renderer=PromptRenderer(),
-        crm_client=crm_client,
+        lookup_customer_handler=lookup_customer_handler,
     )
     service = route_and_respond(
         router=OpenAIRouter(router_client, model="router-model"),
@@ -149,6 +160,9 @@ async def test_router_destination_verification_invokes_verification_agent() -> N
 
 @pytest.mark.asyncio
 async def test_verification_agent_uses_existing_lookup_customer_handler() -> None:
+    store = InMemoryConversationStore()
+    state = store.create("conv-test")
+    store.save = Mock(wraps=store.save)
     crm_client = FakeLegacyCRMClient(result=make_customer())
     client = FakeOpenAIClient(
         FakeOpenAIResponses(
@@ -164,11 +178,16 @@ async def test_verification_agent_uses_existing_lookup_customer_handler() -> Non
             ]
         )
     )
+    lookup_customer_handler = create_lookup_customer_handler(
+        crm_client,
+        conversation_state=state,
+        conversation_store=store,
+    )
     agent = VerificationAgent(
         client=client,
         model="verification-model",
         prompt_renderer=PromptRenderer(),
-        crm_client=crm_client,
+        lookup_customer_handler=lookup_customer_handler,
     )
 
     result = await agent.respond(
@@ -192,7 +211,188 @@ async def test_verification_agent_uses_existing_lookup_customer_handler() -> Non
 
 
 @pytest.mark.asyncio
+async def test_successful_lookup_persists_verified_customer_id() -> None:
+    store = InMemoryConversationStore()
+    state = store.create("conv-verified")
+    store.save = Mock(wraps=store.save)
+    crm_client = FakeLegacyCRMClient(result=make_customer())
+
+    lookup_customer_handler = create_lookup_customer_handler(
+        crm_client,
+        conversation_state=state,
+        conversation_store=store,
+    )
+    agent = VerificationAgent(
+        client=FakeOpenAIClient(
+            FakeOpenAIResponses(
+                responses=[
+                    FakeOpenAIResponse(output=[function_call()], output_text=""),
+                    FakeOpenAIResponse(output=[], output_text="I found Morgan's account."),
+                ]
+            )
+        ),
+        model="verification-model",
+        prompt_renderer=PromptRenderer(),
+        lookup_customer_handler=lookup_customer_handler,
+    )
+
+    result = await agent.respond(
+        context=make_context(),
+        user_message="My phone number is 321-555-0100.",
+    )
+
+    assert result == "I found Morgan's account."
+    store.save.assert_called_once_with(state)
+    assert store.get("conv-verified").verified_customer == make_customer()
+    assert store.get("conv-verified").verified_customer_id == "customer-1001"
+
+
+@pytest.mark.asyncio
+async def test_prepared_lookup_handlers_keep_conversations_isolated() -> None:
+    store = InMemoryConversationStore()
+    customers = [
+        make_customer(),
+        make_customer().model_copy(
+            update={
+                "customer_id": "customer-2002",
+                "first_name": "Taylor",
+                "phone_number": "321-555-0200",
+            }
+        ),
+    ]
+
+    class YieldingCRMClient(FakeLegacyCRMClient):
+        async def find_customer_by_phone(self, phone: str) -> Customer | None:
+            await asyncio.sleep(0)
+            return await super().find_customer_by_phone(phone)
+
+    agents = []
+    crm_clients = []
+    for index, customer in enumerate(customers):
+        state = store.create(f"conv-isolated-{index}")
+        state.original_concern = f"Caller {index}'s concern"
+        crm_client = YieldingCRMClient(result=customer)
+        crm_clients.append(crm_client)
+        lookup_customer_handler = create_lookup_customer_handler(
+            crm_client,
+            conversation_state=state,
+            conversation_store=store,
+        )
+        agents.append(
+            VerificationAgent(
+                client=FakeOpenAIClient(
+                    FakeOpenAIResponses(
+                        responses=[
+                            FakeOpenAIResponse(
+                                output=[function_call(phone=customer.phone_number)],
+                                output_text="",
+                            ),
+                            FakeOpenAIResponse(output=[], output_text=customer.first_name),
+                        ]
+                    )
+                ),
+                model="verification-model",
+                prompt_renderer=PromptRenderer(),
+                lookup_customer_handler=lookup_customer_handler,
+            )
+        )
+
+    results = await asyncio.gather(
+        *(
+            agent.respond(
+                context=make_context(),
+                user_message=f"My phone number is {customer.phone_number}.",
+            )
+            for agent, customer in zip(agents, customers)
+        )
+    )
+
+    assert results == ["Morgan", "Taylor"]
+    for index, customer in enumerate(customers):
+        saved = store.get(f"conv-isolated-{index}")
+        assert saved.verified_customer == customer
+        assert saved.verified_customer_id == customer.customer_id
+        assert saved.original_concern == f"Caller {index}'s concern"
+        assert crm_clients[index].calls == [customer.phone_number]
+
+
+@pytest.mark.asyncio
+async def test_customer_not_found_does_not_save_verified_customer() -> None:
+    store = InMemoryConversationStore()
+    state = store.create("conv-not-found")
+    store.save = Mock(wraps=store.save)
+    crm_client = FakeLegacyCRMClient(result=None)
+
+    lookup_customer_handler = create_lookup_customer_handler(
+        crm_client,
+        conversation_state=state,
+        conversation_store=store,
+    )
+    agent = VerificationAgent(
+        client=FakeOpenAIClient(
+            FakeOpenAIResponses(
+                responses=[
+                    FakeOpenAIResponse(output=[function_call(phone="999-999-9999")], output_text=""),
+                    FakeOpenAIResponse(output=[], output_text="I could not find an account."),
+                ]
+            )
+        ),
+        model="verification-model",
+        prompt_renderer=PromptRenderer(),
+        lookup_customer_handler=lookup_customer_handler,
+    )
+
+    result = await agent.respond(
+        context=make_context(),
+        user_message="My phone number is 999-999-9999.",
+    )
+
+    assert result == "I could not find an account."
+    store.save.assert_not_called()
+    assert store.get("conv-not-found").verified_customer_id is None
+
+
+@pytest.mark.asyncio
+async def test_crm_failure_does_not_save_verified_customer() -> None:
+    store = InMemoryConversationStore()
+    state = store.create("conv-crm-failure")
+    store.save = Mock(wraps=store.save)
+    crm_client = FakeLegacyCRMClient(error=RuntimeError("private CRM detail"))
+
+    lookup_customer_handler = create_lookup_customer_handler(
+        crm_client,
+        conversation_state=state,
+        conversation_store=store,
+    )
+    agent = VerificationAgent(
+        client=FakeOpenAIClient(
+            FakeOpenAIResponses(
+                responses=[
+                    FakeOpenAIResponse(output=[function_call()], output_text=""),
+                ]
+            )
+        ),
+        model="verification-model",
+        prompt_renderer=PromptRenderer(),
+        lookup_customer_handler=lookup_customer_handler,
+    )
+
+    with pytest.raises(RuntimeError, match="approved tool failed") as error:
+        await agent.respond(
+            context=make_context(),
+            user_message="My phone number is 321-555-0100.",
+        )
+
+    assert "private CRM detail" not in str(error.value)
+    store.save.assert_not_called()
+    assert store.get("conv-crm-failure").verified_customer_id is None
+
+
+@pytest.mark.asyncio
 async def test_customer_not_found_produces_safe_response() -> None:
+    store = InMemoryConversationStore()
+    state = store.create("conv-test")
+    store.save = Mock(wraps=store.save)
     crm_client = FakeLegacyCRMClient(result=None)
     client = FakeOpenAIClient(
         FakeOpenAIResponses(
@@ -208,11 +408,16 @@ async def test_customer_not_found_produces_safe_response() -> None:
             ]
         )
     )
+    lookup_customer_handler = create_lookup_customer_handler(
+        crm_client,
+        conversation_state=state,
+        conversation_store=store,
+    )
     agent = VerificationAgent(
         client=client,
         model="verification-model",
         prompt_renderer=PromptRenderer(),
-        crm_client=crm_client,
+        lookup_customer_handler=lookup_customer_handler,
     )
 
     result = await agent.respond(
@@ -226,10 +431,18 @@ async def test_customer_not_found_produces_safe_response() -> None:
 
 @pytest.mark.asyncio
 async def test_unimplemented_destination_raises_specialist_error() -> None:
+    store = InMemoryConversationStore()
+    state = store.create("conv-test")
+    store.save = Mock(wraps=store.save)
     router_client = FakeOpenAIClient(
         FakeOpenAIResponses(parsed=RouteDecision(destination="policy", reason="General clinic information."))
     )
     verification_client = FakeOpenAIClient(FakeOpenAIResponses(responses=[]))
+    lookup_customer_handler = create_lookup_customer_handler(
+        FakeLegacyCRMClient(),
+        conversation_state=state,
+        conversation_store=store,
+    )
     service = route_and_respond(
         router=OpenAIRouter(router_client, model="router-model"),
         renderer=PromptRenderer(),
@@ -237,7 +450,7 @@ async def test_unimplemented_destination_raises_specialist_error() -> None:
             client=verification_client,
             model="verification-model",
             prompt_renderer=PromptRenderer(),
-            crm_client=FakeLegacyCRMClient(),
+            lookup_customer_handler=lookup_customer_handler,
         ),
     )
 
@@ -247,8 +460,16 @@ async def test_unimplemented_destination_raises_specialist_error() -> None:
 
 @pytest.mark.asyncio
 async def test_router_failure_does_not_invoke_verification_agent() -> None:
+    store = InMemoryConversationStore()
+    state = store.create("conv-test")
+    store.save = Mock(wraps=store.save)
     router_client = FakeOpenAIClient(FakeOpenAIResponses(request_error=RuntimeError("private router detail")))
     verification_client = FakeOpenAIClient(FakeOpenAIResponses(responses=[]))
+    lookup_customer_handler = create_lookup_customer_handler(
+        FakeLegacyCRMClient(),
+        conversation_state=state,
+        conversation_store=store,
+    )
     service = route_and_respond(
         router=OpenAIRouter(router_client, model="router-model"),
         renderer=PromptRenderer(),
@@ -256,7 +477,7 @@ async def test_router_failure_does_not_invoke_verification_agent() -> None:
             client=verification_client,
             model="verification-model",
             prompt_renderer=PromptRenderer(),
-            crm_client=FakeLegacyCRMClient(),
+            lookup_customer_handler=lookup_customer_handler,
         ),
     )
 
@@ -269,6 +490,9 @@ async def test_router_failure_does_not_invoke_verification_agent() -> None:
 
 @pytest.mark.asyncio
 async def test_verification_failure_is_not_reported_as_router_failure() -> None:
+    store = InMemoryConversationStore()
+    state = store.create("conv-test")
+    store.save = Mock(wraps=store.save)
     router_client = FakeOpenAIClient(
         FakeOpenAIResponses(parsed=RouteDecision(destination="verification", reason="Caller supplied a phone number."))
     )
@@ -277,6 +501,11 @@ async def test_verification_failure_is_not_reported_as_router_failure() -> None:
             request_error=RuntimeError("private verification detail"),
         )
     )
+    lookup_customer_handler = create_lookup_customer_handler(
+        FakeLegacyCRMClient(),
+        conversation_state=state,
+        conversation_store=store,
+    )
     service = route_and_respond(
         router=OpenAIRouter(router_client, model="router-model"),
         renderer=PromptRenderer(),
@@ -284,7 +513,7 @@ async def test_verification_failure_is_not_reported_as_router_failure() -> None:
             client=verification_client,
             model="verification-model",
             prompt_renderer=PromptRenderer(),
-            crm_client=FakeLegacyCRMClient(),
+            lookup_customer_handler=lookup_customer_handler,
         ),
     )
 

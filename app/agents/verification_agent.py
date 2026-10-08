@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
-from app.agents.lookup_customer_tool import LOOKUP_CUSTOMER_TOOL, create_lookup_customer_handler
+from collections.abc import Awaitable, Callable
+
+from app.agents.lookup_customer_tool import LOOKUP_CUSTOMER_TOOL
 from app.agents.prompt_context import PromptContext
 from app.agents.prompt_renderer import PromptRenderer
 from app.agents.responses_tool_loop import run_agent_turn
-from app.integrations.legacy_crm import LegacyCRMClient
 from openai import AsyncOpenAI
 
 
@@ -24,12 +25,15 @@ class VerificationAgent:
         client: AsyncOpenAI,
         model: str,
         prompt_renderer: PromptRenderer,
-        crm_client: LegacyCRMClient,
+        lookup_customer_handler: Callable[
+            [dict[str, object]],
+            Awaitable[object],
+        ],
     ) -> None:
         self._client = client
         self._model = model
         self._prompt_renderer = prompt_renderer
-        self._crm_client = crm_client
+        self._lookup_customer_handler = lookup_customer_handler
 
     async def respond(
         self,
@@ -45,7 +49,7 @@ class VerificationAgent:
         """
         instructions = self._prompt_renderer.render_verification(context, user_message)
         tool_handlers = {
-            "lookup_customer": create_lookup_customer_handler(self._crm_client),
+            "lookup_customer": self._lookup_customer_handler,
         }
 
         return await run_agent_turn(

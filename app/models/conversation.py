@@ -49,6 +49,7 @@ class ConversationState(BaseModel):
     phase: ConversationPhase = ConversationPhase.STARTED
     messages: list[ConversationMessage] = Field(default_factory=list)
     verified_customer: Customer | None = None
+    verified_customer_id: str | None = None
     selected_pet_id: str | None = None
     original_concern: str | None = None
     intake_answers: IntakeAnswers = Field(default_factory=IntakeAnswers)

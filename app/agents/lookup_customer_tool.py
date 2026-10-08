@@ -7,6 +7,8 @@ from collections.abc import Awaitable, Callable
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.integrations.legacy_crm import LegacyCRMClient
+from app.models.conversation import ConversationState
+from app.services.conversation_store import ConversationStore
 
 
 class LookupCustomerArguments(BaseModel):
@@ -43,28 +45,28 @@ LOOKUP_CUSTOMER_TOOL: dict[str, object] = {
 
 def create_lookup_customer_handler(
     crm_client: LegacyCRMClient,
+    *,
+    conversation_state: ConversationState,
+    conversation_store: ConversationStore,
 ) -> Callable[[dict[str, object]], Awaitable[object]]:
-    """Create the real Python function that handles lookup_customer requests.
-
-    The returned handler validates the LLM's arguments and asks the existing
-    LegacyCRMClient to find the customer. It returns only the customer details
-    the front-desk agent needs for its next response.
-    """
+    """Create the lookup tool that finds and saves the customer for this conversation."""
 
     async def handler(arguments: dict[str, object]) -> object:
         validated = LookupCustomerArguments.model_validate(arguments)
         customer = await crm_client.find_customer_by_phone(validated.phone)
+
         if customer is None:
             return {"found": False}
+
+        conversation_state.verified_customer = customer
+        conversation_state.verified_customer_id = customer.customer_id
+        conversation_store.save(conversation_state)
 
         return {
             "found": True,
             "first_name": customer.first_name,
             "pets": [
-                {
-                    "pet_id": pet.pet_id,
-                    "name": pet.name,
-                }
+                {"pet_id": pet.pet_id, "name": pet.name}
                 for pet in customer.pets
             ],
         }
@@ -72,4 +74,8 @@ def create_lookup_customer_handler(
     return handler
 
 
-__all__ = ["LOOKUP_CUSTOMER_TOOL", "LookupCustomerArguments", "create_lookup_customer_handler"]
+__all__ = [
+    "LOOKUP_CUSTOMER_TOOL",
+    "LookupCustomerArguments",
+    "create_lookup_customer_handler",
+]

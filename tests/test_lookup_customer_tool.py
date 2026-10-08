@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 from typing import cast
+from unittest.mock import Mock
 
 import pytest
 from openai import AsyncOpenAI
@@ -19,6 +20,7 @@ from app.agents.prompt_context import PromptContext
 from app.agents.prompt_renderer import PromptRenderer
 from app.agents.responses_tool_loop import ToolExecutionError, run_agent_turn
 from app.models.customer import Customer, Pet, PetSpecies
+from app.services.conversation_store import InMemoryConversationStore
 from app.integrations.legacy_crm import LegacyCRMParseError, LegacyCRMRequestError
 
 
@@ -100,8 +102,12 @@ def test_lookup_arguments_accept_phone_and_reject_blank_or_extra_fields() -> Non
 
 @pytest.mark.asyncio
 async def test_lookup_handler_returns_only_approved_customer_details() -> None:
+    store = InMemoryConversationStore()
+    state = store.create("conv-test")
+    store.save = Mock(wraps=store.save)
     crm_client = FakeLegacyCRMClient(result=make_customer())
-    handler = create_lookup_customer_handler(crm_client)
+
+    handler = create_lookup_customer_handler(crm_client, conversation_state=state, conversation_store=store)
 
     result = await handler({"phone": "(321) 555-0100"})
 
@@ -123,8 +129,12 @@ async def test_lookup_handler_returns_only_approved_customer_details() -> None:
 
 @pytest.mark.asyncio
 async def test_lookup_not_found_is_a_normal_tool_result() -> None:
+    store = InMemoryConversationStore()
+    state = store.create("conv-test")
+    store.save = Mock(wraps=store.save)
     crm_client = FakeLegacyCRMClient(result=None)
-    handler = create_lookup_customer_handler(crm_client)
+
+    handler = create_lookup_customer_handler(crm_client, conversation_state=state, conversation_store=store)
 
     result = await handler({"phone": "9999999999"})
 
@@ -133,7 +143,56 @@ async def test_lookup_not_found_is_a_normal_tool_result() -> None:
 
 
 @pytest.mark.asyncio
+async def test_lookup_handler_saves_customer_once_for_successful_lookup() -> None:
+    store = InMemoryConversationStore()
+    state = store.create("conv-test")
+    store.save = Mock(wraps=store.save)
+    crm_client = FakeLegacyCRMClient(result=make_customer())
+
+    handler = create_lookup_customer_handler(crm_client, conversation_state=state, conversation_store=store)
+
+    result = await handler({"phone": "(321) 555-0100"})
+
+    assert result["found"] is True
+    store.save.assert_called_once_with(state)
+    assert store.get(state.conversation_id).verified_customer == make_customer()
+    assert store.get(state.conversation_id).verified_customer_id == "customer-private-id"
+
+
+@pytest.mark.asyncio
+async def test_lookup_not_found_does_not_save_verified_customer() -> None:
+    store = InMemoryConversationStore()
+    state = store.create("conv-test")
+    store.save = Mock(wraps=store.save)
+    crm_client = FakeLegacyCRMClient(result=None)
+
+    handler = create_lookup_customer_handler(crm_client, conversation_state=state, conversation_store=store)
+
+    result = await handler({"phone": "9999999999"})
+
+    assert result == {"found": False}
+    store.save.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_lookup_crm_failure_does_not_save_verified_customer() -> None:
+    store = InMemoryConversationStore()
+    state = store.create("conv-test")
+    store.save = Mock(wraps=store.save)
+    crm_client = FakeLegacyCRMClient(error=LegacyCRMRequestError("private detail"))
+
+    handler = create_lookup_customer_handler(crm_client, conversation_state=state, conversation_store=store)
+
+    with pytest.raises(LegacyCRMRequestError):
+        await handler({"phone": "3215550100"})
+    store.save.assert_not_called()
+
+
+@pytest.mark.asyncio
 async def test_two_call_lookup_flow_uses_rendered_prompt_and_safe_tool_result() -> None:
+    store = InMemoryConversationStore()
+    state = store.create("conv-test")
+    store.save = Mock(wraps=store.save)
     caller_message = "My phone number is (321) 555-0100. Which pets are on my account?"
     function_call_item = function_call()
     fake_responses = FakeResponses(
@@ -153,7 +212,7 @@ async def test_two_call_lookup_flow_uses_rendered_prompt_and_safe_tool_result() 
     # actually calls LegacyCRMClient.
     #aka the handler registry connects the LLM’s requested name to the real PawLine Python function
     tool_handlers = {
-        "lookup_customer": create_lookup_customer_handler(crm_client),
+        "lookup_customer": create_lookup_customer_handler(crm_client, conversation_state=state, conversation_store=store),
     }
 
     result = await run_agent_turn(
@@ -194,9 +253,13 @@ async def test_two_call_lookup_flow_uses_rendered_prompt_and_safe_tool_result() 
 )
 @pytest.mark.asyncio
 async def test_crm_failures_are_not_returned_as_not_found_or_sent_to_model(crm_error: Exception) -> None:
+    store = InMemoryConversationStore()
+    state = store.create("conv-test")
+    store.save = Mock(wraps=store.save)
     fake_responses = FakeResponses([SimpleNamespace(output=[function_call()], output_text="")])
     crm_client = FakeLegacyCRMClient(error=crm_error)
-    handler = create_lookup_customer_handler(crm_client)
+
+    handler = create_lookup_customer_handler(crm_client, conversation_state=state, conversation_store=store)
     prompt_context = PromptContext(available_tools=["lookup_customer"])
 
     with pytest.raises(ToolExecutionError, match="approved tool failed") as error:
