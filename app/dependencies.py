@@ -6,6 +6,9 @@ from pathlib import Path
 from fastapi import Request
 from openai import AsyncOpenAI
 
+from app.agents.policy_agent import PolicyAgent
+from app.agents.prompt_renderer import PromptRenderer
+from app.agents.search_policy_tool import create_search_policy_handler
 from app.integrations import (
     HandoffClient,
     LegacyCRMClient,
@@ -129,13 +132,10 @@ async def get_policy_answer_service(request: Request) -> PolicyAnswerService | N
 
         try:
             client = AsyncOpenAI(api_key=api_key)
-            embedding_model = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
             policy_model = os.getenv("OPENAI_POLICY_MODEL", "gpt-6-luna")
-            policy_directory = Path(__file__).resolve().parent.parent / "knowledge" / "clinic_policies"
-            chunks = load_policy_chunks(policy_directory)
-            embedding_provider = OpenAIEmbeddingProvider(client=client, model=embedding_model)
-            retriever = PolicyRetriever(embedding_provider)
-            await retriever.index(chunks)
+            retriever = await get_policy_retriever(request)
+            if retriever is None:
+                return None
             generator = OpenAIPolicyAnswerGenerator(client=client, model=policy_model)
             service = PolicyAnswerService(
                 retriever=retriever,
@@ -149,3 +149,85 @@ async def get_policy_answer_service(request: Request) -> PolicyAnswerService | N
 
         app_state.policy_answer_service = service
         return service
+
+
+async def get_policy_retriever(request: Request) -> PolicyRetriever | None:
+    """Reuse one initialized policy index for HTTP answers and specialist searches."""
+    app_state = request.app.state
+    retriever = getattr(app_state, "policy_retriever", None)
+    if retriever is not None:
+        return retriever
+
+    lock = getattr(app_state, "policy_retriever_lock", None)
+    if lock is None:
+        app_state.policy_retriever_lock = asyncio.Lock()
+        lock = app_state.policy_retriever_lock
+
+    async with lock:
+        retriever = getattr(app_state, "policy_retriever", None)
+        if retriever is not None:
+            return retriever
+
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key or not api_key.strip():
+            return None
+
+        try:
+            client = AsyncOpenAI(api_key=api_key)
+            embedding_model = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
+            policy_directory = Path(__file__).resolve().parent.parent / "knowledge" / "clinic_policies"
+            chunks = load_policy_chunks(policy_directory)
+            embedding_provider = OpenAIEmbeddingProvider(client=client, model=embedding_model)
+            retriever = PolicyRetriever(embedding_provider)
+            await retriever.index(chunks)
+        except Exception:
+            return None
+
+        app_state.policy_retriever = retriever
+        return retriever
+
+
+async def get_policy_agent(request: Request) -> PolicyAgent | None:
+    """Wire a stateless policy specialist to the application's existing retriever."""
+    app_state = request.app.state
+    agent = getattr(app_state, "policy_agent", None)
+    if agent is not None:
+        return agent
+
+    lock = getattr(app_state, "policy_agent_lock", None)
+    if lock is None:
+        app_state.policy_agent_lock = asyncio.Lock()
+        lock = app_state.policy_agent_lock
+
+    async with lock:
+        agent = getattr(app_state, "policy_agent", None)
+        if agent is not None:
+            return agent
+
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key or not api_key.strip():
+            return None
+
+        try:
+            top_k = int(os.getenv("POLICY_TOP_K", "3"))
+            minimum_similarity = float(os.getenv("POLICY_MIN_SIMILARITY", "0.45"))
+            retriever = await get_policy_retriever(request)
+            if retriever is None:
+                return None
+
+            search_policy_handler = create_search_policy_handler(
+                retriever,
+                top_k=top_k,
+                minimum_similarity=minimum_similarity,
+            )
+            agent = PolicyAgent(
+                client=AsyncOpenAI(api_key=api_key),
+                model=os.getenv("OPENAI_POLICY_MODEL", "gpt-6-luna"),
+                prompt_renderer=PromptRenderer(),
+                search_policy_handler=search_policy_handler,
+            )
+        except Exception:
+            return None
+
+        app_state.policy_agent = agent
+        return agent
