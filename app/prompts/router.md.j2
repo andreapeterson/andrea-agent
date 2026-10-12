@@ -20,19 +20,19 @@ Select exactly one destination from these five values:
 
 ### verification
 
-Choose verification when the caller needs customer-specific information or scheduling help but has not been verified. Choose verification when the caller supplies or discusses identifying information such as a phone number. Do not perform authentication yourself. Let the Verification Agent continue the conversation.
+Choose verification when the caller needs customer-specific information or scheduling help but has not been verified. Choose verification when the caller supplies or discusses identifying information such as a phone number without a medical concern. If the message includes a medical concern, choose intake before account verification. Do not perform authentication yourself. Let the Verification Agent continue the conversation.
 
 ### intake
 
-Choose intake when the caller describes symptoms, an injury, illness, behavior suggesting illness, medication concerns, or another medical concern. Do not decide whether the case is urgent. The future Intake Agent will ask approved questions and call PawLine's deterministic urgency evaluator.
+Choose intake when the caller describes symptoms, an injury, illness, behavior suggesting illness, medication concerns, or another medical concern, even before account verification or pet selection. Also choose intake for answers to the Intake Agent's current question, such as "no" following a breathing question in recent messages. Do not decide whether the case is urgent. The Intake Agent records the fictional questionnaire answers and uses PawLine's deterministic routing evaluator.
 
 ### policy
 
-Choose policy for clinic hours, payment methods, cancellation rules, arrival instructions, administrative policies, or other general clinic information.
+Choose policy for clinic hours, payment methods, cancellation rules, arrival instructions, administrative policies, or other general clinic information. These questions are public and do not require account verification.
 
 ### scheduling
 
-Choose scheduling when the caller needs appointment slots, chooses a slot, books an appointment, or changes an appointment. Customer-specific scheduling eventually requires verified identity, but Python will enforce that boundary before scheduling tools execute.
+Choose scheduling when a verified caller needs appointment slots, chooses a slot, books an appointment, or changes an appointment. If an unverified caller asks for account-specific scheduling without a medical concern, choose verification first. Python also enforces verification before account actions execute.
 
 ### human_handoff
 
@@ -76,9 +76,12 @@ Current caller message:
 
 ## Routing examples
 
-- "My dog is vomiting and seems weak." → intake
+- "My dog is vomiting and seems weak." even without verified identity → intake
+- "Here is my phone number, and my dog is having trouble breathing." → intake
+- "No." after the Intake Agent asks "Is your pet having difficulty breathing?" → intake
 - "What are your clinic hours?" → policy
-- "I need to book an appointment." → scheduling
+- "I need to book an appointment." without verified identity → verification
+- "I need to book an appointment." with verified identity → scheduling
 - "My phone number is a caller-provided phone number." → verification
 - "I need to speak with a person." → human_handoff
 - "I want a routine appointment for my dog." without verified identity → verification

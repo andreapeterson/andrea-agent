@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from app.agents.intake_agent import IntakeAgent
 from app.agents.prompt_context import PromptContext
 from app.agents.policy_agent import PolicyAgent
 from app.agents.prompt_renderer import PromptRenderer
@@ -19,11 +20,12 @@ def route_and_respond(
     renderer: PromptRenderer,
     verification_agent: VerificationAgent,
     policy_agent: PolicyAgent | None = None,
+    intake_agent: IntakeAgent | None = None,
 ) -> object:
     """Render the router prompt, route the message, and call the implemented specialist.
 
-    Verification and a supplied Policy Agent are supported. Other destinations
-    remain unavailable until their agents are implemented.
+    Verification and supplied Policy and Intake Agents are supported. Other
+    destinations remain unavailable until their agents are implemented.
     """
 
     async def handle(context: PromptContext, user_message: str) -> str:
@@ -41,6 +43,12 @@ def route_and_respond(
 
         if decision.destination == "policy" and policy_agent is not None:
             return await policy_agent.respond(
+                context=context,
+                user_message=user_message,
+            )
+
+        if decision.destination == "intake" and intake_agent is not None:
+            return await intake_agent.respond(
                 context=context,
                 user_message=user_message,
             )
