@@ -10,10 +10,11 @@ from .prompt_context import PromptContext
 
 # This identifies the exact instructions used for an LLM call, like a version number for application code.
 FRONT_DESK_PROMPT_VERSION = "front-desk-v1"
-ROUTER_PROMPT_VERSION = "router-v2"
+ROUTER_PROMPT_VERSION = "router-v3"
 VERIFICATION_PROMPT_VERSION = "verification-v1"
 POLICY_PROMPT_VERSION = "policy-v1"
-INTAKE_PROMPT_VERSION = "intake-v1"
+INTAKE_PROMPT_VERSION = "intake-v2"
+HUMAN_HANDOFF_PROMPT_VERSION = "human-handoff-v1"
 # Templates live beside this module so their instructions can be reviewed and versioned with the code.
 DEFAULT_TEMPLATE_DIRECTORY = Path(__file__).resolve().parent.parent / "prompts"
 
@@ -148,6 +149,23 @@ class PromptRenderer:
                 f"Unable to render prompt version '{INTAKE_PROMPT_VERSION}'."
             ) from exc
 
+    def render_human_handoff(self, context: PromptContext, user_message: str) -> str:
+        """Render human assistance instructions without sending the handoff request."""
+        if not user_message or not user_message.strip():
+            raise PromptRenderingError("User message cannot be blank.")
+
+        template_values = context.model_dump(mode="json")
+        template_values["prompt_version"] = HUMAN_HANDOFF_PROMPT_VERSION
+        template_values["user_message"] = user_message.strip()
+
+        try:
+            template = self._environment.get_template("human_handoff.md.j2")
+            return template.render(**template_values)
+        except (OSError, TemplateError) as exc:
+            raise PromptRenderingError(
+                f"Unable to render prompt version '{HUMAN_HANDOFF_PROMPT_VERSION}'."
+            ) from exc
+
 
 __all__ = [
     "FRONT_DESK_PROMPT_VERSION",
@@ -155,6 +173,7 @@ __all__ = [
     "VERIFICATION_PROMPT_VERSION",
     "POLICY_PROMPT_VERSION",
     "INTAKE_PROMPT_VERSION",
+    "HUMAN_HANDOFF_PROMPT_VERSION",
     "PromptRenderer",
     "PromptRenderingError",
 ]

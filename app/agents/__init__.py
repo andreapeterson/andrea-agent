@@ -2,11 +2,13 @@
 
 from .lookup_customer_tool import LOOKUP_CUSTOMER_TOOL
 from .intake_agent import IntakeAgent
+from .human_handoff_agent import HumanHandoffAgent
+from .request_handoff_tool import REQUEST_HANDOFF_TOOL
 from .record_intake_tool import RECORD_INTAKE_TOOL
 from .policy_agent import PolicyAgent
 from .search_policy_tool import SEARCH_POLICY_TOOL
 from .prompt_context import PromptContext
-from .prompt_renderer import FRONT_DESK_PROMPT_VERSION, INTAKE_PROMPT_VERSION, POLICY_PROMPT_VERSION, ROUTER_PROMPT_VERSION, VERIFICATION_PROMPT_VERSION, PromptRenderer, PromptRenderingError
+from .prompt_renderer import FRONT_DESK_PROMPT_VERSION, HUMAN_HANDOFF_PROMPT_VERSION, INTAKE_PROMPT_VERSION, POLICY_PROMPT_VERSION, ROUTER_PROMPT_VERSION, VERIFICATION_PROMPT_VERSION, PromptRenderer, PromptRenderingError
 from .responses_tool_loop import (
 	AgentModelRequestError,
 	MalformedToolCallError,
@@ -20,6 +22,9 @@ from .router_agent import OpenAIRouter, RouteDecision, RouterRequestError, Route
 __all__ = [
 	"FRONT_DESK_PROMPT_VERSION",
 	"INTAKE_PROMPT_VERSION",
+	"HUMAN_HANDOFF_PROMPT_VERSION",
+	"HumanHandoffAgent",
+	"REQUEST_HANDOFF_TOOL",
 	"IntakeAgent",
 	"RECORD_INTAKE_TOOL",
 	"LOOKUP_CUSTOMER_TOOL",

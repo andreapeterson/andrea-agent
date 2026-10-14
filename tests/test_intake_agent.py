@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from types import SimpleNamespace
 from typing import cast
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import pytest
 from openai import AsyncOpenAI
@@ -18,6 +18,7 @@ from app.agents.record_intake_tool import (
     RecordIntakeArguments,
     create_record_intake_handler,
 )
+from app.agents.request_handoff_tool import REQUEST_HANDOFF_TOOL
 from app.agents.responses_tool_loop import ToolExecutionError
 from app.agents.router_handoff import SpecialistNotAvailableError, route_and_respond
 from app.models.routing import IntakeAnswers, RoutingAction, RoutingLevel
@@ -232,6 +233,7 @@ def prepare_agent(handler, responses: FakeResponses) -> IntakeAgent:
         model="intake-test-model",
         prompt_renderer=PromptRenderer(),
         record_intake_handler=handler,
+        request_handoff_handler=AsyncMock(side_effect=AssertionError("No handoff expected in this intake test")),
     )
 
 
@@ -256,7 +258,7 @@ async def test_intake_loop_records_facts_and_sends_updated_result_in_second_requ
     assert len(responses.create_calls) == 2
     assert responses.create_calls[0]["input"] == [{"role": "user", "content": "No."}]
     for request in responses.create_calls:
-        assert request["tools"] == [RECORD_INTAKE_TOOL]
+        assert request["tools"] == [RECORD_INTAKE_TOOL, REQUEST_HANDOFF_TOOL]
         assert request["model"] == "intake-test-model"
         assert request["instructions"] == PromptRenderer().render_intake(context, "No.")
     assert "difficulty_breathing: unknown" in responses.create_calls[0]["instructions"]
@@ -348,7 +350,7 @@ def test_intake_renderer_rejects_blank_message(message: str) -> None:
 
 def test_intake_renderer_reports_template_error(tmp_path) -> None:
     (tmp_path / "intake.md.j2").write_text("{{ missing }}", encoding="utf-8")
-    with pytest.raises(PromptRenderingError, match="intake-v1"):
+    with pytest.raises(PromptRenderingError, match=INTAKE_PROMPT_VERSION):
         PromptRenderer(template_directory=tmp_path).render_intake(PromptContext(), "Help")
 
 

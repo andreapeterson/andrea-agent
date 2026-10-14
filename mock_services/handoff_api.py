@@ -7,8 +7,9 @@ from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 
-from app.models.handoff import HandoffReceipt, HandoffRequest, HandoffStatus
-from app.models.routing import RoutingAction, RoutingLevel
+from app.models.handoff import HandoffReason, HandoffReceipt, HandoffRequest, HandoffStatus
+from app.models.routing import RoutingLevel
+from app.services.routing import assess_routing
 
 app = FastAPI(title="Mock Human Handoff API")
 HANDOFF_STORE: list[HandoffRequest] = []
@@ -65,8 +66,12 @@ async def create_handoff(
     request: HandoffRequest,
     _verified: None = Depends(verify_handoff_signature),
 ) -> HandoffReceipt:
-    if request.routing_decision.routing_level != RoutingLevel.URGENT or request.routing_decision.next_action != RoutingAction.CREATE_HANDOFF:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="handoff-not-required")
+    if request.reason == HandoffReason.URGENT_INTAKE:
+        decision = assess_routing(request.intake_answers)
+        if decision.routing_level != RoutingLevel.URGENT:
+            raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="handoff-not-required")
+        # Store the assessed decision, never the sender's unverified urgency label.
+        request = request.model_copy(update={"routing_decision": decision})
 
     HANDOFF_STORE.append(request.model_copy(deep=True))
 

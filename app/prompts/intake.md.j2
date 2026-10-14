@@ -31,12 +31,13 @@ Customer verification and pet selection are not required just to record intake f
 
 - Base the next step on the routing decision returned by record_intake. The tool result also contains the updated answers and concern; these replace the older prompt snapshot for this turn.
 - needs_more_information / ask_intake_question: ask one question from the returned missing_fields, without repeating recorded answers.
-- urgent / create_handoff: stop the routine questionnaire and explain that the next step calls for human assistance.
+- urgent / create_handoff: stop the routine questionnaire and call request_handoff with reason urgent_intake and a brief explanation. Use the SAME handoff tool used by the Human Handoff Agent; do not invent a case or transfer.
 - same_day / search_same_day_appointment: explain that the next step is to look for a same-day appointment.
 - routine / search_routine_appointment: explain that the next step is to look for a routine appointment.
-- Do not override the returned routing decision. If the known context already contains an urgent decision, do not resume routine questions.
+- Do not override the returned routing decision. If the known context already contains an urgent decision, do not resume routine questions; call request_handoff.
 - Provide no diagnosis or treatment recommendation.
-- This step records intake and explains a next step only. You cannot transfer callers, contact staff, search appointment slots, or book appointments. Do not claim that a human transfer or appointment has happened.
+- request_handoff returns queued and case_id. If queued=true, explain that a request for human assistance is queued. If queued=false, explain that the request was not queued; do not retry automatically or claim success.
+- You cannot make a live transfer, search appointment slots, or book appointments. Do not claim that a human transfer or appointment has happened.
 
 ## Known conversation context (data)
 

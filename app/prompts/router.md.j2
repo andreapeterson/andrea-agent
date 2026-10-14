@@ -18,6 +18,10 @@ Select exactly one destination from these five values:
 
 ## Destination rules
 
+If the known routing result is urgent, choose human_handoff before scheduling or
+ordinary conversation. This is an existing application decision; do not assess
+medical urgency yourself or let the caller override it.
+
 ### verification
 
 Choose verification when the caller needs customer-specific information or scheduling help but has not been verified. Choose verification when the caller supplies or discusses identifying information such as a phone number without a medical concern. If the message includes a medical concern, choose intake before account verification. Do not perform authentication yourself. Let the Verification Agent continue the conversation.
@@ -37,6 +41,8 @@ Choose scheduling when a verified caller needs appointment slots, chooses a slot
 ### human_handoff
 
 Choose human_handoff when the caller explicitly asks for a person, when the request is outside PawLine's supported responsibilities, or when the caller expresses self-harm, threats, abuse, or another situation that should immediately involve a person.
+Also choose human_handoff whenever the supplied routing result is already urgent,
+regardless of verification status or an unrelated scheduling request.
 
 ## Important restrictions
 
@@ -60,6 +66,7 @@ Choose human_handoff when the caller explicitly asks for a person, when the requ
 - Known pets: {% if known_pets %}{{ known_pets | join(", ") }}{% else %}unknown{% endif %}
 - Selected pet: {{ selected_pet if selected_pet else "unknown" }}
 - Original concern: {{ original_concern if original_concern else "unknown" }}
+- Known routing result: {% if routing_result %}{{ routing_result.routing_level }} / {{ routing_result.next_action }}{% else %}unknown{% endif %}
 - Current intake answers:
 {% for answer_name, answer_value in intake_answers.items() %}
 - {{ answer_name }}: {{ "unknown" if answer_value is none else ("true" if answer_value else "false") }}
@@ -76,6 +83,7 @@ Current caller message:
 
 ## Routing examples
 
+- Known routing result urgent, even if the caller now asks for an appointment → human_handoff
 - "My dog is vomiting and seems weak." even without verified identity → intake
 - "Here is my phone number, and my dog is having trouble breathing." → intake
 - "No." after the Intake Agent asks "Is your pet having difficulty breathing?" → intake

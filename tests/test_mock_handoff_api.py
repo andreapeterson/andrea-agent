@@ -7,7 +7,7 @@ from datetime import datetime
 import pytest
 from fastapi.testclient import TestClient
 
-from mock_services.handoff_api import app
+from mock_services.handoff_api import HANDOFF_STORE, app, reset_handoff_store
 
 TEST_SECRET = "test-handoff-secret"
 
@@ -102,6 +102,7 @@ def _non_urgent_payload() -> dict:
 @pytest.fixture
 def client(monkeypatch) -> TestClient:
     monkeypatch.setenv("MOCK_HANDOFF_WEBHOOK_SECRET", TEST_SECRET)
+    reset_handoff_store()
     return TestClient(app)
 
 
@@ -222,3 +223,47 @@ def test_valid_signed_non_urgent_decision_returns_409(client: TestClient) -> Non
 
     assert response.status_code == 409
     assert response.json()["detail"] == "handoff-not-required"
+
+
+def test_forged_urgent_label_with_non_urgent_answers_is_rejected(client: TestClient) -> None:
+    payload = _non_urgent_payload()
+    payload["reason"] = "urgent_intake"
+    payload["routing_decision"] = _urgent_payload()["routing_decision"]
+    raw_body, headers = _signed_request_bytes(payload)
+    response = client.post("/handoffs", content=raw_body, headers=headers)
+    assert response.status_code == 409
+    assert response.json()["detail"] == "handoff-not-required"
+    assert HANDOFF_STORE == []
+
+
+def test_urgent_answers_are_reassessed_despite_a_non_urgent_routing_label(client: TestClient) -> None:
+    payload = _urgent_payload()
+    payload["routing_decision"] = _non_urgent_payload()["routing_decision"]
+    raw_body, headers = _signed_request_bytes(payload)
+    response = client.post("/handoffs", content=raw_body, headers=headers)
+    assert response.status_code == 202
+    assert HANDOFF_STORE[0].routing_decision.routing_level.value == "urgent"
+
+
+@pytest.mark.parametrize("reason", ["caller_request", "out_of_scope", "safety_concern"])
+def test_signed_general_request_needs_no_clinical_fields(client: TestClient, reason: str) -> None:
+    payload = {"conversation_id": "general", "reason": reason, "explanation": "The caller needs clinic staff."}
+    raw_body, headers = _signed_request_bytes(payload)
+    response = client.post("/handoffs", content=raw_body, headers=headers)
+    assert response.status_code == 202
+    assert response.json()["status"] == "queued"
+
+
+@pytest.mark.parametrize("explanation", [None, "", "  "])
+def test_signed_general_request_rejects_missing_or_blank_explanation(client: TestClient, explanation: str | None) -> None:
+    payload = {"conversation_id": "general", "reason": "caller_request", "explanation": explanation}
+    raw_body, headers = _signed_request_bytes(payload)
+    response = client.post("/handoffs", content=raw_body, headers=headers)
+    assert response.status_code == 422
+
+
+def test_general_request_still_requires_a_valid_signature(client: TestClient) -> None:
+    payload = {"conversation_id": "general", "reason": "caller_request", "explanation": "Please get staff."}
+    raw_body, headers = _signed_request_bytes(payload, secret="wrong-secret")
+    response = client.post("/handoffs", content=raw_body, headers=headers)
+    assert response.status_code == 401
