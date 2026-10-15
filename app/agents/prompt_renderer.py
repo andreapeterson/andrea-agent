@@ -10,12 +10,12 @@ from .prompt_context import PromptContext
 
 # This identifies the exact instructions used for an LLM call, like a version number for application code.
 FRONT_DESK_PROMPT_VERSION = "front-desk-v1"
-ROUTER_PROMPT_VERSION = "router-v4"
+ROUTER_PROMPT_VERSION = "router-v5"
 VERIFICATION_PROMPT_VERSION = "verification-v1"
 POLICY_PROMPT_VERSION = "policy-v1"
 INTAKE_PROMPT_VERSION = "intake-v2"
 HUMAN_HANDOFF_PROMPT_VERSION = "human-handoff-v1"
-SCHEDULING_PROMPT_VERSION = "scheduling-v1"
+SCHEDULING_PROMPT_VERSION = "scheduling-v2"
 # Templates live beside this module so their instructions can be reviewed and versioned with the code.
 DEFAULT_TEMPLATE_DIRECTORY = Path(__file__).resolve().parent.parent / "prompts"
 
@@ -168,7 +168,7 @@ class PromptRenderer:
             ) from exc
 
     def render_scheduling(self, context: PromptContext, user_message: str) -> str:
-        """Render search and selection instructions without calling the scheduler."""
+        """Render scheduling instructions without executing any tools."""
         if not user_message or not user_message.strip():
             raise PromptRenderingError("User message cannot be blank.")
 

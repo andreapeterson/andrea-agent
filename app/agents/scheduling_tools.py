@@ -1,4 +1,4 @@
-"""Find and select owned-pet appointment slots without making a booking."""
+"""Find, select, and explicitly confirm owned-pet appointments."""
 
 from __future__ import annotations
 
@@ -6,8 +6,16 @@ from collections.abc import Awaitable, Callable
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from app.integrations.scheduler_client import SchedulerClient, SchedulerRequestError, SchedulerResponseError
-from app.models.appointment import AppointmentSlot, AppointmentType
+from app.integrations.scheduler_client import (
+    CallerConfirmationRequiredError,
+    IdempotencyConflictError,
+    SchedulerClient,
+    SchedulerRequestError,
+    SchedulerResponseError,
+    SlotNotFoundError,
+    SlotUnavailableError,
+)
+from app.models.appointment import AppointmentSlot, AppointmentType, BookingConfirmation, BookingRequest
 from app.models.conversation import ConversationPhase, ConversationState
 from app.models.customer import Pet
 from app.models.routing import RoutingLevel
@@ -28,6 +36,12 @@ class SelectAppointmentSlotArguments(BaseModel):
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid", strict=True)
 
     slot_id: str = Field(min_length=1, description="Exact ID of a slot offered in this conversation.")
+
+
+class BookSelectedAppointmentArguments(BaseModel):
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    confirmed_by_caller: bool
 
 
 FIND_APPOINTMENT_SLOTS_TOOL: dict[str, object] = {
@@ -54,7 +68,24 @@ SELECT_APPOINTMENT_SLOT_TOOL: dict[str, object] = {
 }
 
 
-def _scheduling_eligibility(state: ConversationState) -> tuple[AppointmentType | None, dict[str, object] | None]:
+BOOK_SELECTED_APPOINTMENT_TOOL: dict[str, object] = {
+    "type": "function",
+    "name": "book_selected_appointment",
+    "description": (
+        "Call only while confirming the exact selected appointment. "
+        "true means the caller explicitly confirmed that appointment; "
+        "false means the caller explicitly declined it. Do not call for ambiguous replies. "
+        "A tool call with false must never contact the scheduler. "
+        "All appointment details come from trusted conversation state."
+    ),
+    "strict": True,
+    "parameters": BookSelectedAppointmentArguments.model_json_schema(),
+}
+
+
+def _scheduling_eligibility(
+    state: ConversationState, *, allow_pending_booking: bool = False,
+) -> tuple[AppointmentType | None, dict[str, object] | None]:
     """Read trusted state; keep blocked and pending attempts completely unchanged."""
     if state.handoff_receipt is not None or state.phase == ConversationPhase.HANDOFF_COMPLETE:
         return None, {"status": "handoff_complete"}
@@ -62,7 +93,7 @@ def _scheduling_eligibility(state: ConversationState) -> tuple[AppointmentType |
         return None, {"status": "booking_complete"}
     if state.phase == ConversationPhase.COMPLETED:
         return None, {"status": "conversation_complete"}
-    if state.booking_idempotency_key is not None:
+    if state.booking_idempotency_key is not None and not allow_pending_booking:
         return None, {"status": "booking_recovery_required"}
     # An ID or prompt flag alone does not establish a CRM-confirmed customer.
     if state.verified_customer is None:
@@ -216,8 +247,133 @@ def create_select_appointment_slot_handler(
     return handler
 
 
+def create_book_selected_appointment_handler(
+    scheduler_client: SchedulerClient,
+    *,
+    conversation_state: ConversationState,
+    conversation_store: ConversationStore,
+    idempotency_key_factory: Callable[[], str],
+) -> Callable[[dict[str, object]], Awaitable[object]]:
+    """Book only the trusted selected appointment, retaining uncertain attempts for retry."""
+
+    async def handler(arguments: dict[str, object]) -> object:
+        validated = BookSelectedAppointmentArguments.model_validate(arguments)
+        if conversation_state.booking_confirmation is not None:
+            return {"status": "booking_confirmed", "confirmation": conversation_state.booking_confirmation.model_dump(mode="json")}
+
+        # A saved key may already represent a successful booking; preserve its selection for recovery.
+        if conversation_state.booking_idempotency_key is not None and not validated.confirmed_by_caller:
+            return {"status": "booking_recovery_required", "booking_outcome_uncertain": True}
+
+        appointment_type, blocked = _scheduling_eligibility(conversation_state, allow_pending_booking=True)
+        if blocked is not None:
+            return blocked
+        pets = [
+            pet for pet in conversation_state.verified_customer.pets
+            if pet.pet_id == conversation_state.selected_pet_id
+        ]
+        if len(pets) != 1:
+            return _pet_clarification(conversation_state)
+        if conversation_state.phase != ConversationPhase.CONFIRMING_BOOKING:
+            return {"status": "confirmation_required"}
+        if conversation_state.selected_slot_id is None:
+            return {"status": "selection_required"}
+        if conversation_state.appointment_type != appointment_type:
+            return {"status": "search_required"}
+        try:
+            slots = _validated_slots(conversation_state.offered_slots, appointment_type)
+        except (SchedulerResponseError, ValidationError, TypeError):
+            return {"status": "search_required"}
+        matches = [slot for slot in slots if slot.slot_id == conversation_state.selected_slot_id]
+        if len(matches) != 1:
+            return {"status": "slot_not_offered"}
+
+        if not validated.confirmed_by_caller: #caller declined selected slot, clear and retrun to selection phase with the same offered slots, so the model can try a different slot for the same pet and type
+            conversation_state.selected_slot_id = None
+            conversation_state.phase = ConversationPhase.SELECTING_APPOINTMENT
+            conversation_store.save(conversation_state)
+            return {
+                "status": "booking_declined",
+                "slots": [slot.model_dump(mode="json") for slot in slots],
+            }
+
+        booking_request = BookingRequest(
+            slot_id=conversation_state.selected_slot_id,
+            pet_id=conversation_state.selected_pet_id,
+            confirmed_by_caller=True,
+        )
+        if conversation_state.booking_idempotency_key is None:
+            key = idempotency_key_factory() #key for retry if the response is lost, so the scheduler does not double-book
+            if not isinstance(key, str) or not key.strip():
+                raise ValueError("The idempotency key factory must return a nonblank string.")
+            conversation_state.booking_idempotency_key = key
+        # Persist before every send, including retries after an earlier store failure.
+        # A lost response must not cause a second key on retry.
+        conversation_store.save(conversation_state)
+
+        try:
+            confirmation = await scheduler_client.book_appointment(
+                booking_request,
+                conversation_state.booking_idempotency_key,
+            )
+            confirmation = BookingConfirmation.model_validate(
+                confirmation.model_dump() if isinstance(confirmation, BookingConfirmation) else confirmation
+            )
+            if (
+                not confirmation.booking_id
+                or confirmation.slot_id != booking_request.slot_id
+                or confirmation.pet_id != booking_request.pet_id
+            ):
+                raise SchedulerResponseError("Booking confirmation does not match the trusted request.")
+        except (SlotUnavailableError, SlotNotFoundError): #slot taken or deleted, or scheduler lost the slot and cannot confirm it
+            # clears slot and key and tries again, but does not clear the pet or appointment type, so the model can try a different slot for the same pet and type
+            conversation_state.selected_slot_id = None
+            conversation_state.booking_idempotency_key = None
+            conversation_state.offered_slots = []
+            conversation_state.phase = ConversationPhase.SELECTING_APPOINTMENT
+            conversation_store.save(conversation_state)
+            try:
+                refreshed = await scheduler_client.find_slots(booking_request.pet_id, appointment_type)
+                alternatives = _validated_slots(refreshed, appointment_type)
+            except (SchedulerRequestError, SchedulerResponseError, ValidationError, TypeError):
+                return {"status": "search_required", "slots": []}
+
+            current_type, blocked = _scheduling_eligibility(conversation_state)
+            if blocked is not None:
+                return blocked
+            if current_type != appointment_type or conversation_state.selected_pet_id != booking_request.pet_id:
+                return {"status": "search_required"}
+            if not any(pet.pet_id == booking_request.pet_id for pet in conversation_state.verified_customer.pets):
+                return _pet_clarification(conversation_state)
+            conversation_state.offered_slots = [slot for slot in alternatives if slot.slot_id != booking_request.slot_id]
+            conversation_store.save(conversation_state)
+            return {
+                "status": "slot_unavailable",
+                "selected_pet": _pet_details(pets[0]),
+                "appointment_type": appointment_type.value,
+                "slots": [slot.model_dump(mode="json") for slot in conversation_state.offered_slots],
+            }
+        except IdempotencyConflictError: #same key was used for a different request, so the scheduler cannot confirm this booking
+            return {"status": "idempotency_conflict"}
+        except CallerConfirmationRequiredError: #invalid request
+            return {"status": "invalid_booking_request"}
+        except SchedulerRequestError: #netowrk
+            return {"status": "scheduler_unavailable", "retry_allowed": True}
+        except (SchedulerResponseError, ValidationError, TypeError): #scheduler returned malformed or unexpected data, or the confirmation could not be validated
+            return {"status": "invalid_scheduler_response"}
+
+        conversation_state.booking_confirmation = confirmation
+        conversation_state.phase = ConversationPhase.BOOKING_COMPLETE
+        conversation_store.save(conversation_state)
+        return {"status": "booking_confirmed", "confirmation": confirmation.model_dump(mode="json")}
+
+    return handler
+
+
 __all__ = [
     "FIND_APPOINTMENT_SLOTS_TOOL", "SELECT_APPOINTMENT_SLOT_TOOL",
     "FindAppointmentSlotsArguments", "SelectAppointmentSlotArguments",
     "create_find_appointment_slots_handler", "create_select_appointment_slot_handler",
+    "BOOK_SELECTED_APPOINTMENT_TOOL", "BookSelectedAppointmentArguments",
+    "create_book_selected_appointment_handler",
 ]

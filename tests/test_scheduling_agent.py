@@ -17,6 +17,7 @@ from app.agents import OpenAIRouter, PromptContext, PromptRenderer, RouteDecisio
 from app.agents.prompt_renderer import SCHEDULING_PROMPT_VERSION, PromptRenderingError
 from app.agents.router_handoff import route_and_respond
 from app.agents.scheduling_tools import (
+    BOOK_SELECTED_APPOINTMENT_TOOL,
     FIND_APPOINTMENT_SLOTS_TOOL,
     SELECT_APPOINTMENT_SLOT_TOOL,
     create_find_appointment_slots_handler,
@@ -371,7 +372,7 @@ def output(tool: str | None = None, args: dict[str, object] | None = None, text:
 
 
 def agent(responses, find, select):
-    return SchedulingAgent(client=fake_client(responses), model="scheduling-test-model", prompt_renderer=PromptRenderer(), find_appointment_slots_handler=find, select_appointment_slot_handler=select)
+    return SchedulingAgent(client=fake_client(responses), model="scheduling-test-model", prompt_renderer=PromptRenderer(), find_appointment_slots_handler=find, select_appointment_slot_handler=select, book_selected_appointment_handler=AsyncMock(side_effect=AssertionError("No booking expected in this search/selection test")))
 
 
 @pytest.mark.asyncio
@@ -389,7 +390,7 @@ async def test_router_dispatch_and_search_selection_rounds_send_results_back_to_
     assert await handle(context=PromptContext(customer_verified=True), user_message="Find a slot for Milo; I prefer the second option.") == answer
     assert len(responses.calls) == 3
     for request in responses.calls:
-        assert request["tools"] == [FIND_APPOINTMENT_SLOTS_TOOL, SELECT_APPOINTMENT_SLOT_TOOL]
+        assert request["tools"] == [FIND_APPOINTMENT_SLOTS_TOOL, SELECT_APPOINTMENT_SLOT_TOOL, BOOK_SELECTED_APPOINTMENT_TOOL]
         assert request["model"] == "scheduling-test-model"
     found = responses.calls[1]["input"][-1]
     selected = responses.calls[2]["input"][-1]

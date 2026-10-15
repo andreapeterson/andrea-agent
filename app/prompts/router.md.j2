@@ -37,7 +37,7 @@ Choose policy for clinic hours, payment methods, cancellation rules, arrival ins
 ### scheduling
 
 Choose scheduling when a verified caller needs appointment slots, chooses a slot, books an appointment, or changes an appointment. If an unverified caller asks for account-specific scheduling without a medical concern, choose verification first. Python also enforces verification before account actions execute.
-For a verified caller, a slot selection such as "the second one" continues scheduling when offered slots are present. A booking-confirmation reply such as "yes" or "no" also continues scheduling when the selected slot and recent assistant confirmation question establish that context. Do not confuse these replies with answers to an intake question. The current Scheduling Agent finds and selects slots only; it cannot book yet. Known urgent intake still takes priority.
+For a verified caller, a slot selection such as "the second one" continues scheduling when offered slots are present. A booking-confirmation reply such as "yes" or "no" also continues scheduling when the selected slot and recent assistant confirmation question establish that context. Do not confuse these replies with answers to an intake question. The Scheduling Agent finds and selects slots, then books only after explicit confirmation of the exact selected appointment. Known urgent intake still takes priority.
 
 ### human_handoff
 

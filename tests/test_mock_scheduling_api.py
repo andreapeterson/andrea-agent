@@ -186,3 +186,25 @@ def test_booking_without_caller_confirmation_returns_400(monkeypatch) -> None:
 
     assert response.status_code == 400
     assert response.json()["detail"] == "caller-confirmation-required"
+
+
+def test_repeated_same_key_and_request_returns_same_booking(monkeypatch) -> None:
+    monkeypatch.setenv("MOCK_SCHEDULER_JWT_SECRET", TEST_SECRET)
+    client = TestClient(app)
+    headers = _auth_headers(_token(), "same-attempt")
+    payload = {"slot_id": "slot_routine_01", "pet_id": "pet_2001", "confirmed_by_caller": True}
+    first = client.post("/bookings", json=payload, headers=headers)
+    second = client.post("/bookings", json=payload, headers=headers)
+    assert first.status_code == second.status_code == 201
+    assert first.json() == second.json()
+
+
+def test_reusing_key_with_different_slot_is_an_idempotency_conflict(monkeypatch) -> None:
+    monkeypatch.setenv("MOCK_SCHEDULER_JWT_SECRET", TEST_SECRET)
+    client = TestClient(app)
+    headers = _auth_headers(_token(), "same-attempt")
+    payload = {"slot_id": "slot_routine_01", "pet_id": "pet_2001", "confirmed_by_caller": True}
+    assert client.post("/bookings", json=payload, headers=headers).status_code == 201
+    response = client.post("/bookings", json={**payload, "slot_id": "slot_routine_02"}, headers=headers)
+    assert response.status_code == 409
+    assert response.json()["detail"] == "idempotency-key-reused"

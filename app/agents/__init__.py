@@ -7,7 +7,7 @@ from .request_handoff_tool import REQUEST_HANDOFF_TOOL
 from .record_intake_tool import RECORD_INTAKE_TOOL
 from .policy_agent import PolicyAgent
 from .scheduling_agent import SchedulingAgent
-from .scheduling_tools import FIND_APPOINTMENT_SLOTS_TOOL, SELECT_APPOINTMENT_SLOT_TOOL
+from .scheduling_tools import BOOK_SELECTED_APPOINTMENT_TOOL, FIND_APPOINTMENT_SLOTS_TOOL, SELECT_APPOINTMENT_SLOT_TOOL
 from .search_policy_tool import SEARCH_POLICY_TOOL
 from .prompt_context import PromptContext
 from .prompt_renderer import FRONT_DESK_PROMPT_VERSION, HUMAN_HANDOFF_PROMPT_VERSION, INTAKE_PROMPT_VERSION, POLICY_PROMPT_VERSION, ROUTER_PROMPT_VERSION, SCHEDULING_PROMPT_VERSION, VERIFICATION_PROMPT_VERSION, PromptRenderer, PromptRenderingError
@@ -27,6 +27,7 @@ __all__ = [
 	"SchedulingAgent",
 	"FIND_APPOINTMENT_SLOTS_TOOL",
 	"SELECT_APPOINTMENT_SLOT_TOOL",
+	"BOOK_SELECTED_APPOINTMENT_TOOL",
 	"INTAKE_PROMPT_VERSION",
 	"HUMAN_HANDOFF_PROMPT_VERSION",
 	"HumanHandoffAgent",
