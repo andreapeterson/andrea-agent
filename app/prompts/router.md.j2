@@ -37,6 +37,7 @@ Choose policy for clinic hours, payment methods, cancellation rules, arrival ins
 ### scheduling
 
 Choose scheduling when a verified caller needs appointment slots, chooses a slot, books an appointment, or changes an appointment. If an unverified caller asks for account-specific scheduling without a medical concern, choose verification first. Python also enforces verification before account actions execute.
+For a verified caller, a slot selection such as "the second one" continues scheduling when offered slots are present. A booking-confirmation reply such as "yes" or "no" also continues scheduling when the selected slot and recent assistant confirmation question establish that context. Do not confuse these replies with answers to an intake question. The current Scheduling Agent finds and selects slots only; it cannot book yet. Known urgent intake still takes priority.
 
 ### human_handoff
 
@@ -67,6 +68,8 @@ regardless of verification status or an unrelated scheduling request.
 - Selected pet: {{ selected_pet if selected_pet else "unknown" }}
 - Original concern: {{ original_concern if original_concern else "unknown" }}
 - Known routing result: {% if routing_result %}{{ routing_result.routing_level }} / {{ routing_result.next_action }}{% else %}unknown{% endif %}
+- Offered slot IDs: {% if offered_slots %}{% for slot in offered_slots %}{{ slot.slot_id }}{% if not loop.last %}, {% endif %}{% endfor %}{% else %}none{% endif %}
+- Selected slot ID: {{ selected_slot.slot_id if selected_slot else "none" }}
 - Current intake answers:
 {% for answer_name, answer_value in intake_answers.items() %}
 - {{ answer_name }}: {{ "unknown" if answer_value is none else ("true" if answer_value else "false") }}
@@ -90,6 +93,8 @@ Current caller message:
 - "What are your clinic hours?" → policy
 - "I need to book an appointment." without verified identity → verification
 - "I need to book an appointment." with verified identity → scheduling
+- "The second one." with verified identity and displayed offered slots → scheduling
+- "Yes." after an appointment confirmation question, with verified identity and a selected slot → scheduling
 - "My phone number is a caller-provided phone number." → verification
 - "I need to speak with a person." → human_handoff
 - "I want a routine appointment for my dog." without verified identity → verification

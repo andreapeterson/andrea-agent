@@ -9,6 +9,7 @@ from app.agents.policy_agent import PolicyAgent
 from app.agents.prompt_renderer import PromptRenderer
 from app.agents.router_agent import OpenAIRouter, RouteDecision
 from app.agents.verification_agent import VerificationAgent
+from app.agents.scheduling_agent import SchedulingAgent
 
 
 class SpecialistNotAvailableError(RuntimeError):
@@ -23,11 +24,12 @@ def route_and_respond(
     policy_agent: PolicyAgent | None = None,
     intake_agent: IntakeAgent | None = None,
     human_handoff_agent: HumanHandoffAgent | None = None,
+    scheduling_agent: SchedulingAgent | None = None,
 ) -> object:
     """Render the router prompt, route the message, and call the implemented specialist.
 
-    Verification and supplied Policy, Intake, and Human Handoff Agents are supported.
-    Scheduling remains unavailable until its agent is implemented.
+    Verification and supplied Policy, Intake, Human Handoff, and Scheduling Agents
+    are supported. An unsupplied specialist remains unavailable.
     """
 
     async def handle(context: PromptContext, user_message: str) -> str:
@@ -57,6 +59,12 @@ def route_and_respond(
 
         if decision.destination == "human_handoff" and human_handoff_agent is not None:
             return await human_handoff_agent.respond(
+                context=context,
+                user_message=user_message,
+            )
+
+        if decision.destination == "scheduling" and scheduling_agent is not None:
+            return await scheduling_agent.respond(
                 context=context,
                 user_message=user_message,
             )
