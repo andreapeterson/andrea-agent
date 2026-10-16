@@ -34,7 +34,7 @@ class PolicyAgent:
         If the model requests search_policy, the loop runs the prepared handler
         and sends its evidence back to the model, then returns the caller-facing answer.
         """
-        instructions = self._prompt_renderer.render_policy(context, user_message)
+        instructions = self._prompt_renderer.render_policy(context)
         tool_handlers = {"search_policy": self._search_policy_handler}
 
         return await run_agent_turn(

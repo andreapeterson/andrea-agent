@@ -33,7 +33,7 @@ def route_and_respond(
     """
 
     async def handle(context: PromptContext, user_message: str) -> str:
-        instructions = renderer.render_router(context, user_message)
+        instructions = renderer.render_router(context)
         decision = await router.route(
             instructions=instructions,
             user_message=user_message,

@@ -115,3 +115,25 @@ def test_default_context_uses_unknown_and_empty_collections() -> None:
     assert context.offered_slots == []
     assert context.booking_confirmed is None
     assert context.available_tools == []
+
+
+@pytest.mark.parametrize("agent", ["router", "verification", "policy", "intake", "human_handoff", "scheduling"])
+def test_agent_renderers_accept_only_saved_context(agent: str) -> None:
+    context = make_prompt_context()
+    previous_message = "Previously saved caller message: {{ literal_history }}"
+    context.recent_messages = [ConversationMessage(role=ConversationRole.USER, content=previous_message)]
+    before = context.model_copy(deep=True)
+
+    prompt = getattr(PromptRenderer(), f"render_{agent}")(context)
+
+    assert f"user: {previous_message}" in prompt
+    assert "Current caller message" not in prompt
+    assert context == before
+
+
+@pytest.mark.parametrize("agent", ["router", "verification", "policy", "intake", "human_handoff", "scheduling"])
+def test_current_message_is_not_available_as_a_template_value(agent: str, tmp_path) -> None:
+    (tmp_path / f"{agent}.md.j2").write_text("{{ user_message }}", encoding="utf-8")
+
+    with pytest.raises(PromptRenderingError, match="Unable to render prompt version"):
+        getattr(PromptRenderer(template_directory=tmp_path), f"render_{agent}")(PromptContext())

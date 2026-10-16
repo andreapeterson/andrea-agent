@@ -30,7 +30,7 @@ class HumanHandoffAgent:
 
     async def respond(self, *, context: PromptContext, user_message: str) -> str:
         """Let the model request a handoff and describe the tool's actual result."""
-        instructions = self._prompt_renderer.render_human_handoff(context, user_message)
+        instructions = self._prompt_renderer.render_human_handoff(context)
         tool_handlers = {"request_handoff": self._request_handoff_handler}
 
         return await run_agent_turn(

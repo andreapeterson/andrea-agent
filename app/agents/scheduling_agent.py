@@ -34,7 +34,7 @@ class SchedulingAgent:
 
     async def respond(self, *, context: PromptContext, user_message: str) -> str:
         """Render the prompt; the shared loop executes tools and returns caller-facing text."""
-        instructions = self._prompt_renderer.render_scheduling(context, user_message)
+        instructions = self._prompt_renderer.render_scheduling(context)
         tool_handlers = {
             "find_appointment_slots": self._find_appointment_slots_handler,
             "select_appointment_slot": self._select_appointment_slot_handler,

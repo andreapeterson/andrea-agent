@@ -47,7 +47,7 @@ class VerificationAgent:
         The model may request lookup_customer, and the approved Python handler then
         contacts the CRM. The method returns the agent's caller-facing response.
         """
-        instructions = self._prompt_renderer.render_verification(context, user_message)
+        instructions = self._prompt_renderer.render_verification(context)
         tool_handlers = {
             "lookup_customer": self._lookup_customer_handler,
         }

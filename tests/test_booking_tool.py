@@ -379,7 +379,7 @@ async def test_booking_model_call_receives_function_call_output_before_final_tex
 
 
 def test_booking_prompt_requires_exact_confirmation_and_explains_uncertain_outcomes() -> None:
-    prompt = PromptRenderer().render_scheduling(PromptContext(selected_pet="Milo", selected_slot=slot()), "Maybe.")
+    prompt = PromptRenderer().render_scheduling(PromptContext(selected_pet="Milo", selected_slot=slot()))
     assert "clinic identifier" in prompt
     assert "clinic clinic-1" in prompt
     assert "only after the caller explicitly says yes" in prompt

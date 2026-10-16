@@ -33,7 +33,7 @@ class IntakeAgent:
 
     async def respond(self, *, context: PromptContext, user_message: str) -> str:
         """Render the intake prompt, record requested facts, and return caller-facing text."""
-        instructions = self._prompt_renderer.render_intake(context, user_message)
+        instructions = self._prompt_renderer.render_intake(context)
         # Connect the model's tool name to the prepared Python recording function.
         tool_handlers = {
             "record_intake": self._record_intake_handler,

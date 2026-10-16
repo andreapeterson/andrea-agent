@@ -10,12 +10,12 @@ from .prompt_context import PromptContext
 
 # This identifies the exact instructions used for an LLM call, like a version number for application code.
 FRONT_DESK_PROMPT_VERSION = "front-desk-v1"
-ROUTER_PROMPT_VERSION = "router-v5"
-VERIFICATION_PROMPT_VERSION = "verification-v1"
-POLICY_PROMPT_VERSION = "policy-v1"
-INTAKE_PROMPT_VERSION = "intake-v2"
-HUMAN_HANDOFF_PROMPT_VERSION = "human-handoff-v1"
-SCHEDULING_PROMPT_VERSION = "scheduling-v2"
+ROUTER_PROMPT_VERSION = "router-v6"
+VERIFICATION_PROMPT_VERSION = "verification-v2"
+POLICY_PROMPT_VERSION = "policy-v2"
+INTAKE_PROMPT_VERSION = "intake-v3"
+HUMAN_HANDOFF_PROMPT_VERSION = "human-handoff-v2"
+SCHEDULING_PROMPT_VERSION = "scheduling-v3"
 # Templates live beside this module so their instructions can be reviewed and versioned with the code.
 DEFAULT_TEMPLATE_DIRECTORY = Path(__file__).resolve().parent.parent / "prompts"
 
@@ -72,19 +72,15 @@ class PromptRenderer:
                 f"Unable to render prompt version '{self.prompt_version}'."
             ) from exc
 
-    def render_router(self, context: PromptContext, user_message: str) -> str:
-        """Render router instructions from allowlisted context and the caller message.
+    def render_router(self, context: PromptContext) -> str:
+        """Render router instructions from allowlisted saved context.
 
         The context contains only conversation facts needed for routing. This
         method returns prompt text; it does not select a destination or execute a
         specialist.
         """
-        if not user_message or not user_message.strip():
-            raise PromptRenderingError("User message cannot be blank.")
-
         template_values = context.model_dump(mode="json")
         template_values["prompt_version"] = ROUTER_PROMPT_VERSION
-        template_values["user_message"] = user_message.strip()
 
         try:
             template = self._environment.get_template("router.md.j2")
@@ -94,19 +90,15 @@ class PromptRenderer:
                 f"Unable to render prompt version '{ROUTER_PROMPT_VERSION}'."
             ) from exc
 
-    def render_verification(self, context: PromptContext, user_message: str) -> str:
-        """Render verification instructions from allowlisted context and the caller message.
+    def render_verification(self, context: PromptContext) -> str:
+        """Render verification instructions from allowlisted saved context.
 
         The context contains only conversation facts needed for safe customer
         identification. This method returns prompt text; it does not call the CRM
         or execute another agent.
         """
-        if not user_message or not user_message.strip():
-            raise PromptRenderingError("User message cannot be blank.")
-
         template_values = context.model_dump(mode="json")
         template_values["prompt_version"] = VERIFICATION_PROMPT_VERSION
-        template_values["user_message"] = user_message.strip()
 
         try:
             template = self._environment.get_template("verification.md.j2")
@@ -116,14 +108,10 @@ class PromptRenderer:
                 f"Unable to render prompt version '{VERIFICATION_PROMPT_VERSION}'."
             ) from exc
 
-    def render_policy(self, context: PromptContext, user_message: str) -> str:
+    def render_policy(self, context: PromptContext) -> str:
         """Render policy instructions without retrieving evidence or answering the question."""
-        if not user_message or not user_message.strip():
-            raise PromptRenderingError("User message cannot be blank.")
-
         template_values = context.model_dump(mode="json")
         template_values["prompt_version"] = POLICY_PROMPT_VERSION
-        template_values["user_message"] = user_message.strip()
 
         try:
             template = self._environment.get_template("policy.md.j2")
@@ -133,14 +121,10 @@ class PromptRenderer:
                 f"Unable to render prompt version '{POLICY_PROMPT_VERSION}'."
             ) from exc
 
-    def render_intake(self, context: PromptContext, user_message: str) -> str:
-        """Render intake instructions from the existing context and current caller message."""
-        if not user_message or not user_message.strip():
-            raise PromptRenderingError("User message cannot be blank.")
-
+    def render_intake(self, context: PromptContext) -> str:
+        """Render intake instructions from allowlisted saved context."""
         template_values = context.model_dump(mode="json")
         template_values["prompt_version"] = INTAKE_PROMPT_VERSION
-        template_values["user_message"] = user_message.strip()
 
         try:
             template = self._environment.get_template("intake.md.j2")
@@ -150,14 +134,10 @@ class PromptRenderer:
                 f"Unable to render prompt version '{INTAKE_PROMPT_VERSION}'."
             ) from exc
 
-    def render_human_handoff(self, context: PromptContext, user_message: str) -> str:
+    def render_human_handoff(self, context: PromptContext) -> str:
         """Render human assistance instructions without sending the handoff request."""
-        if not user_message or not user_message.strip():
-            raise PromptRenderingError("User message cannot be blank.")
-
         template_values = context.model_dump(mode="json")
         template_values["prompt_version"] = HUMAN_HANDOFF_PROMPT_VERSION
-        template_values["user_message"] = user_message.strip()
 
         try:
             template = self._environment.get_template("human_handoff.md.j2")
@@ -167,14 +147,10 @@ class PromptRenderer:
                 f"Unable to render prompt version '{HUMAN_HANDOFF_PROMPT_VERSION}'."
             ) from exc
 
-    def render_scheduling(self, context: PromptContext, user_message: str) -> str:
+    def render_scheduling(self, context: PromptContext) -> str:
         """Render scheduling instructions without executing any tools."""
-        if not user_message or not user_message.strip():
-            raise PromptRenderingError("User message cannot be blank.")
-
         template_values = context.model_dump(mode="json")
         template_values["prompt_version"] = SCHEDULING_PROMPT_VERSION
-        template_values["user_message"] = user_message.strip()
 
         try:
             template = self._environment.get_template("scheduling.md.j2")
