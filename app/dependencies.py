@@ -20,6 +20,60 @@ from app.integrations.turn_interpreter import OpenAITurnInterpreter
 from app.services import AgentOrchestrator, InMemoryConversationStore, PolicyAnswerService
 from app.services.policy_loader import load_policy_chunks
 from app.services.policy_retriever import PolicyRetriever
+from app.services.prompt_agent_runtime import PromptAgentRuntime
+
+
+async def get_prompt_agent_runtime(request: Request) -> PromptAgentRuntime | None:
+    # app.state owns the shared runtime so conversations survive across HTTP requests in this process.
+    app_state = request.app.state
+    runtime = getattr(app_state, "prompt_agent_runtime", None)
+    if runtime is not None:
+        return runtime
+
+    lock = getattr(app_state, "prompt_agent_runtime_lock", None)
+    if lock is None:
+        lock = asyncio.Lock()
+        app_state.prompt_agent_runtime_lock = lock
+
+    async with lock:
+        runtime = getattr(app_state, "prompt_agent_runtime", None)
+        if runtime is not None:
+            return runtime
+
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key or not api_key.strip():
+            return None
+
+        try:
+            crm_client = get_legacy_crm_client()
+            scheduler_client = get_scheduler_client()
+            handoff_client = get_handoff_client()
+            policy_agent = await get_policy_agent(request)
+            if policy_agent is None:
+                return None
+
+            store = getattr(app_state, "conversation_store", None)
+            if store is None:
+                store = InMemoryConversationStore()
+                app_state.conversation_store = store
+
+            runtime = PromptAgentRuntime(
+                conversation_store=store,
+                client=AsyncOpenAI(api_key=api_key),
+                router_model=os.getenv("OPENAI_ROUTER_MODEL", "gpt-6-luna"),
+                specialist_model=os.getenv("OPENAI_SPECIALIST_MODEL", "gpt-6-luna"),
+                prompt_renderer=PromptRenderer(),
+                legacy_crm_client=crm_client,
+                scheduler_client=scheduler_client,
+                handoff_client=handoff_client,
+                policy_agent=policy_agent,
+                idempotency_key_factory=lambda: uuid.uuid4().hex,
+            )
+        except Exception:
+            return None
+
+        app_state.prompt_agent_runtime = runtime
+        return runtime
 
 
 async def get_agent_orchestrator(request: Request) -> AgentOrchestrator | None:
