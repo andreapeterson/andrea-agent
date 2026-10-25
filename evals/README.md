@@ -36,3 +36,33 @@ A later opt-in live evaluation will supply an adapter that renders the existing
 Router instructions, calls the real Router with the caller message as input,
 and returns the decision's destination. It will reuse this dataset and grader;
 7D1 does not implement or invoke that adapter.
+
+## Specialist first actions (7D2)
+
+Router eval asks, “Which specialist?” Specialist eval asks, “Should this
+specialist speak or request a tool, and with what arguments?”
+`specialist_cases.jsonl` contains 15 fictional cases, three per specialist.
+The loader reuses `PromptContext` and the real Pydantic tool-argument models,
+including required null fields. It also checks each specialist's approved tools.
+
+Pass an async `run_case(case)` to `run_specialist_evaluation`; return a
+`SpecialistFirstAction(action, tool_name, arguments)`. The runner records one
+first action per case. It never constructs clients, runs agents, retrieves
+policy, or executes handlers. `format_specialist_report` prints the report.
+
+Scores are separate, overall and per specialist:
+
+- **Action accuracy:** tool versus speech, across all cases.
+- **Tool-name accuracy:** exact tool name, across expected-tool cases only.
+- **Argument accuracy:** exact JSON arguments, across expected-tool cases only.
+  Object key order is ignored; types, missing keys, nulls, and exact strings
+  (including explanation/query strings) matter. Arguments are graded independently
+  of tool-name correctness, so one mistake need not fail both checks.
+- **Complete-case accuracy:** every applicable check must pass. Speech cases
+  require no tool or arguments; spoken wording is never compared.
+
+Empty metric denominators receive 0. Errors in the injected callable propagate.
+7D2 tests the evaluation machinery using fakes; its scores do not yet measure
+the real model or prove execution safety. A later opt-in live adapter will run
+these same cases against OpenAI and capture the first action without executing
+the requested tool. Expected labels and human reasons must stay out of model input.
