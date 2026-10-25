@@ -23,9 +23,7 @@ from app.agents.responses_tool_loop import (
 from app.agents.router_agent import RouteDecision, RouterRequestError, RouterResponseError
 from app.agents.router_handoff import SpecialistNotAvailableError
 from app.dependencies import get_prompt_agent_runtime
-from app.integrations.handoff_client import HandoffClient
-from app.integrations.legacy_crm import LegacyCRMClient
-from app.integrations.scheduler_client import SchedulerClient
+from app.integrations import HandoffClient, LegacyCRMClient, SchedulerClient
 from app.main import app
 from app.models.agent_result import AgentTurnResult
 from app.models.conversation import ConversationPhase, ConversationState

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from app.integrations.policy_answer_generator import (
+from app.integrations import (
     PolicyAnswerGenerator,
     PolicyGenerationResponseError,
 )

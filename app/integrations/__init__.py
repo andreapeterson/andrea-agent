@@ -34,14 +34,6 @@ from .scheduler_client import (
     SlotNotFoundError,
     SlotUnavailableError,
 )
-from .turn_interpreter import (
-    OpenAITurnInterpreter,
-    TurnInterpretationError,
-    TurnInterpretationRequestError,
-    TurnInterpretationResponseError,
-    TurnInterpreter,
-    build_turn_interpretation_prompt,
-)
 
 __all__ = [
     "CallerConfirmationRequiredError",
@@ -59,7 +51,6 @@ __all__ = [
     "LegacyCRMParseError",
     "LegacyCRMRequestError",
     "OpenAIEmbeddingProvider",
-    "OpenAITurnInterpreter",
     "OpenAIPolicyAnswerGenerator",
     "PolicyAnswerGenerator",
     "PolicyGenerationError",
@@ -72,11 +63,6 @@ __all__ = [
     "SchedulerResponseError",
     "SlotNotFoundError",
     "SlotUnavailableError",
-    "TurnInterpretationError",
-    "TurnInterpretationRequestError",
-    "TurnInterpretationResponseError",
-    "TurnInterpreter",
     "build_policy_answer_prompt",
-    "build_turn_interpretation_prompt",
     "parse_customer_xml",
 ]

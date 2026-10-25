@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from app.integrations.handoff_client import (
+from app.integrations import (
     HandoffClient,
     HandoffNotRequiredError,
     HandoffRequestError,

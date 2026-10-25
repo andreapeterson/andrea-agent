@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.integrations.legacy_crm import LegacyCRMClient
+from app.integrations import LegacyCRMClient
 from app.models.conversation import ConversationState
 from app.services.conversation_store import ConversationStore
 

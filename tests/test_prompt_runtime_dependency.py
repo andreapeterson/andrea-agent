@@ -12,9 +12,7 @@ from openai import AsyncOpenAI
 from app import dependencies
 from app.agents.policy_agent import PolicyAgent
 from app.agents.prompt_renderer import PromptRenderer
-from app.integrations.handoff_client import HandoffClient
-from app.integrations.legacy_crm import LegacyCRMClient
-from app.integrations.scheduler_client import SchedulerClient
+from app.integrations import HandoffClient, LegacyCRMClient, SchedulerClient
 from app.services.conversation_store import InMemoryConversationStore
 from app.services.prompt_agent_runtime import PromptAgentRuntime
 
@@ -62,7 +60,8 @@ async def test_runtime_and_store_are_cached_with_configured_clients_and_models(c
     assert runtime is reused is setup.request.app.state.prompt_agent_runtime
     assert isinstance(setup.request.app.state.conversation_store, InMemoryConversationStore)
     assert reused._conversation_store.get("shared-conversation") == started.state
-    assert runtime._client is setup.client
+    assert runtime._openai_client is setup.client
+    assert runtime._router._client is setup.client
     assert runtime._legacy_crm_client is setup.crm
     assert runtime._scheduler_client is setup.scheduler
     assert runtime._handoff_client is setup.handoff

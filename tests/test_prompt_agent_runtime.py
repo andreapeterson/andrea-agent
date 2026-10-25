@@ -17,14 +17,13 @@ from app.agents.prompt_renderer import PromptRenderer
 from app.agents.responses_tool_loop import AgentModelRequestError
 from app.agents.router_agent import RouteDecision, RouterRequestError
 from app.agents.router_handoff import SpecialistNotAvailableError
-from app.integrations.handoff_client import HandoffClient
-from app.integrations.legacy_crm import LegacyCRMClient
-from app.integrations.scheduler_client import SchedulerClient, SchedulerRequestError
+from app.integrations import HandoffClient, LegacyCRMClient, SchedulerClient, SchedulerRequestError
 from app.models.appointment import AppointmentSlot, AppointmentType, BookingConfirmation, BookingStatus
 from app.models.conversation import ConversationMessage, ConversationPhase, ConversationRole
 from app.models.customer import Customer, Pet, PetSpecies
 from app.models.handoff import HandoffReceipt, HandoffStatus
 from app.models.routing import IntakeAnswers
+from app.services import prompt_agent_runtime
 from app.services.conversation_store import ConversationNotFoundError, InMemoryConversationStore
 from app.services.prompt_agent_runtime import PromptAgentRuntime
 from app.services.routing import assess_routing
@@ -97,7 +96,7 @@ def runtime_setup():
     key_factory = Mock(return_value="private-booking-key")
     runtime = PromptAgentRuntime(
         conversation_store=store,
-        client=client,
+        openai_client=client,
         router_model="router-model",
         specialist_model="specialist-model",
         prompt_renderer=renderer,
@@ -160,6 +159,25 @@ async def test_one_turn_routes_to_exactly_one_specialist_and_saves_ordered_histo
     setup.scheduler.book_appointment.assert_not_awaited()
     setup.handoff.create_handoff.assert_not_awaited()
     setup.policy_search.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_router_and_runtime_configured_specialists_share_injected_openai_client(runtime_setup, monkeypatch) -> None:
+    setup = runtime_setup
+    constructors = []
+    for name in ("VerificationAgent", "IntakeAgent", "HumanHandoffAgent", "SchedulingAgent"):
+        constructor = Mock(wraps=getattr(prompt_agent_runtime, name))
+        monkeypatch.setattr(prompt_agent_runtime, name, constructor)
+        constructors.append(constructor)
+
+    await setup.runtime.start_conversation("conv-shared-client")
+    await setup.runtime.handle_turn("conv-shared-client", "Hello")
+
+    assert setup.runtime._openai_client is setup.client
+    assert setup.runtime._router._client is setup.client
+    for constructor in constructors:
+        constructor.assert_called_once()
+        assert constructor.call_args.kwargs["client"] is setup.client
 
 
 @pytest.mark.asyncio

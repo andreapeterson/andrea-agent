@@ -6,7 +6,7 @@ from collections.abc import Awaitable, Callable
 
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
-from app.integrations.scheduler_client import (
+from app.integrations import (
     CallerConfirmationRequiredError,
     IdempotencyConflictError,
     SchedulerClient,

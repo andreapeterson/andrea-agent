@@ -24,9 +24,7 @@ from app.agents.scheduling_tools import (
     create_select_appointment_slot_handler,
 )
 from app.agents.verification_agent import VerificationAgent
-from app.integrations.handoff_client import HandoffClient
-from app.integrations.legacy_crm import LegacyCRMClient
-from app.integrations.scheduler_client import SchedulerClient
+from app.integrations import HandoffClient, LegacyCRMClient, SchedulerClient
 from app.models.agent_result import AgentTurnResult
 from app.models.conversation import (
     ConversationMessage,
@@ -44,7 +42,7 @@ class PromptAgentRuntime:
         self,
         *,
         conversation_store: ConversationStore,
-        client: AsyncOpenAI,
+        openai_client: AsyncOpenAI,
         router_model: str,
         specialist_model: str,
         prompt_renderer: PromptRenderer,
@@ -55,8 +53,8 @@ class PromptAgentRuntime:
         idempotency_key_factory: Callable[[], str],
     ) -> None:
         self._conversation_store = conversation_store
-        self._client = client
-        self._router = OpenAIRouter(client, model=router_model)
+        self._openai_client = openai_client
+        self._router = OpenAIRouter(openai_client, model=router_model)
         self._specialist_model = specialist_model
         self._prompt_renderer = prompt_renderer
         self._legacy_crm_client = legacy_crm_client
@@ -134,7 +132,7 @@ class PromptAgentRuntime:
                 return AgentTurnResult(state=state, assistant_message=message)
 
             context = self._build_prompt_context(state)
-            # Prepare handlers per conversation: every stateful tool modifies this same loaded object.
+            # All handlers share this state; service-backed tools also receive their service client.
             lookup_handler = create_lookup_customer_handler(
                 self._legacy_crm_client,
                 conversation_state=state,
@@ -165,31 +163,31 @@ class PromptAgentRuntime:
                 idempotency_key_factory=self._idempotency_key_factory,
             )
 
-            # Agents configure model calls; they are not separate running programs.
+            # Agents configure model calls. Tool definitions go to the model; handlers run in Python.
             handle = route_and_respond( #configured function that knows which router and specialists to call based on the current conversation state and user message
                 router=self._router,
                 renderer=self._prompt_renderer,
                 verification_agent=VerificationAgent(
-                    client=self._client,
+                    client=self._openai_client,
                     model=self._specialist_model,
                     prompt_renderer=self._prompt_renderer,
                     lookup_customer_handler=lookup_handler,
                 ),
                 intake_agent=IntakeAgent(
-                    client=self._client,
+                    client=self._openai_client,
                     model=self._specialist_model,
                     prompt_renderer=self._prompt_renderer,
                     record_intake_handler=intake_handler,
                     request_handoff_handler=handoff_handler,
                 ),
                 human_handoff_agent=HumanHandoffAgent(
-                    client=self._client,
+                    client=self._openai_client,
                     model=self._specialist_model,
                     prompt_renderer=self._prompt_renderer,
                     request_handoff_handler=handoff_handler,
                 ),
                 scheduling_agent=SchedulingAgent(
-                    client=self._client,
+                    client=self._openai_client,
                     model=self._specialist_model,
                     prompt_renderer=self._prompt_renderer,
                     find_appointment_slots_handler=find_slots_handler,

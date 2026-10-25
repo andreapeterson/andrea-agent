@@ -16,8 +16,7 @@ from app.integrations import (
     OpenAIPolicyAnswerGenerator,
     SchedulerClient,
 )
-from app.integrations.turn_interpreter import OpenAITurnInterpreter
-from app.services import AgentOrchestrator, InMemoryConversationStore, PolicyAnswerService
+from app.services import InMemoryConversationStore, PolicyAnswerService
 from app.services.policy_loader import load_policy_chunks
 from app.services.policy_retriever import PolicyRetriever
 from app.services.prompt_agent_runtime import PromptAgentRuntime
@@ -57,9 +56,11 @@ async def get_prompt_agent_runtime(request: Request) -> PromptAgentRuntime | Non
                 store = InMemoryConversationStore()
                 app_state.conversation_store = store
 
+            # Construct one client shared by the router and runtime-configured specialists.
+            openai_client = AsyncOpenAI(api_key=api_key)
             runtime = PromptAgentRuntime(
                 conversation_store=store,
-                client=AsyncOpenAI(api_key=api_key),
+                openai_client=openai_client,
                 router_model=os.getenv("OPENAI_ROUTER_MODEL", "gpt-6-luna"),
                 specialist_model=os.getenv("OPENAI_SPECIALIST_MODEL", "gpt-6-luna"),
                 prompt_renderer=PromptRenderer(),
@@ -74,56 +75,6 @@ async def get_prompt_agent_runtime(request: Request) -> PromptAgentRuntime | Non
 
         app_state.prompt_agent_runtime = runtime
         return runtime
-
-
-async def get_agent_orchestrator(request: Request) -> AgentOrchestrator | None:
-    app_state = request.app.state
-    orchestrator = getattr(app_state, "agent_orchestrator", None)
-    if orchestrator is not None:
-        return orchestrator
-
-    lock = getattr(app_state, "agent_orchestrator_lock", None)
-    if lock is None:
-        app_state.agent_orchestrator_lock = asyncio.Lock()
-        lock = app_state.agent_orchestrator_lock
-
-    async with lock:
-        orchestrator = getattr(app_state, "agent_orchestrator", None)
-        if orchestrator is not None:
-            return orchestrator
-
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key or not api_key.strip():
-            app_state.agent_orchestrator = None
-            return None
-
-        try:
-            crm_client = get_legacy_crm_client()
-            scheduler_client = get_scheduler_client()
-            handoff_client = get_handoff_client()
-            policy_service = await get_policy_answer_service(request)
-            if policy_service is None:
-                app_state.agent_orchestrator = None
-                return None
-
-            orchestrator = AgentOrchestrator(
-                conversation_store=InMemoryConversationStore(),
-                turn_interpreter=OpenAITurnInterpreter(
-                    client=AsyncOpenAI(api_key=api_key),
-                    model=os.getenv("OPENAI_TURN_MODEL", "gpt-6-luna"),
-                ),
-                legacy_crm_client=crm_client,
-                scheduler_client=scheduler_client,
-                handoff_client=handoff_client,
-                policy_service=policy_service,
-                idempotency_key_factory=lambda: uuid.uuid4().hex,
-            )
-        except Exception:
-            app_state.agent_orchestrator = None
-            return None
-
-        app_state.agent_orchestrator = orchestrator
-        return orchestrator
 
 
 def get_legacy_crm_client() -> LegacyCRMClient:

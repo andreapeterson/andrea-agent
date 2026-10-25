@@ -170,17 +170,16 @@ Expected response shape:
 
 If the evidence is weak or missing, the route returns `status: "insufficient_context"` with a safe fallback answer and no citations instead of inventing a policy answer.
 
-## Part 6B: single-turn fact extraction
+## Prompt-driven conversations
 
-PawLine now includes a minimal turn-understanding layer for converting one natural-language caller message into typed observations.
+The conversation endpoints use `PromptAgentRuntime` to send each caller message
+through the Router and one specialist. The specialist can request approved tools;
+Python executes their prepared handlers and saves the conversation state.
 
-- The LLM converts natural language into typed facts such as a phone number, pet reference, concern text, intake updates, or appointment selection.
-- It does not make routing or safety decisions, and it does not choose tools or perform workflow actions.
-- `ExtractedIntakeUpdates` represents only what was clearly present in the newest message; `ConversationState` remains the accumulated memory across a conversation.
-- Deterministic orchestration and tool execution are intentionally deferred to future 6C work.
-- The automated tests use mocked structured output rather than real OpenAI calls.
-
-This is a fact-extraction boundary only: the model may interpret a caller message, but it must not mutate `ConversationState`, create a handoff, or book an appointment.
+The runtime and conversation store are shared across HTTP requests in this process.
+The Router and runtime-configured specialists share one OpenAI client. The prepared
+Policy Agent keeps its existing retrieval dependencies. Tests use fake model and
+service clients without making external API calls.
 
 ## Part 6A: conversation memory foundation
 
