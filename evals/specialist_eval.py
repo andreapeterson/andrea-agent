@@ -6,7 +6,9 @@ import json
 from collections.abc import Awaitable, Callable, Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Literal
+from typing import Annotated, Any, Literal, Self
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.agents.lookup_customer_tool import LookupCustomerArguments
 from app.agents.prompt_context import PromptContext
@@ -38,17 +40,30 @@ SPECIALIST_TOOLS = {
 }
 
 
-@dataclass(frozen=True)
-class SpecialistEvalCase:
-    case_id: str
-    specialist: str
-    user_message: str
+class SpecialistEvalCase(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
+
+    case_id: str = Field(min_length=1)
+    specialist: str = Field(min_length=1)
+    user_message: str = Field(min_length=1)
     context: PromptContext
     expected_action: Literal["tool", "speech"]
-    expected_tool: str | None
+    expected_tool: str | None = Field(min_length=1)
     expected_arguments: dict[str, object] | None
-    tags: list[str]
-    reason: str
+    tags: list[Annotated[str, Field(min_length=1)]] = Field(min_length=1)
+    reason: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def validate_expected_action(self) -> Self:
+        if self.expected_action == "speech":
+            if self.expected_tool is not None or self.expected_arguments is not None:
+                raise ValueError("speech requires null tool and arguments")
+        else:
+            if self.expected_tool is None:
+                raise ValueError("tool action requires a nonblank expected_tool")
+            if self.expected_arguments is None:
+                raise ValueError("tool action requires an expected_arguments dictionary")
+        return self
 
 
 @dataclass(frozen=True)
@@ -91,10 +106,6 @@ def _validate_action(action: str, tool: str | None, arguments: dict[str, object]
 
 def load_specialist_cases(path: str | Path = DEFAULT_CASES_PATH) -> list[SpecialistEvalCase]:
     """Validate labels with current argument models; never prepare or execute handlers."""
-    fields = {
-        "case_id", "specialist", "user_message", "context", "expected_action",
-        "expected_tool", "expected_arguments", "tags", "reason",
-    }
     cases = []
     seen_ids = set()
     with Path(path).open(encoding="utf-8") as source:
@@ -103,36 +114,18 @@ def load_specialist_cases(path: str | Path = DEFAULT_CASES_PATH) -> list[Special
                 continue
             try:
                 row = json.loads(line, parse_constant=_reject_json_constant)
-                if not isinstance(row, dict) or set(row) != fields:
-                    raise ValueError(f"each case must contain exactly these fields: {', '.join(sorted(fields))}")
-                case_id = _nonblank_string(row["case_id"], "case_id")
-                if case_id in seen_ids:
-                    raise ValueError(f"duplicate case_id: {case_id}")
-                specialist = _nonblank_string(row["specialist"], "specialist")
-                if specialist not in SPECIALIST_TOOLS:
-                    raise ValueError(f"unsupported specialist: {specialist}")
-                _validate_action(row["expected_action"], row["expected_tool"], row["expected_arguments"])
-                if row["expected_action"] == "tool":
-                    tool = row["expected_tool"]
-                    if tool not in SPECIALIST_TOOLS[specialist]:
-                        raise ValueError(f"unsupported tool for {specialist}: {tool}")
-                    TOOL_ARGUMENT_MODELS[tool].model_validate(row["expected_arguments"])
-                if not isinstance(row["tags"], list) or not row["tags"]:
-                    raise ValueError("tags must be a nonempty list of nonblank strings")
-                case = SpecialistEvalCase(
-                    case_id=case_id,
-                    specialist=specialist,
-                    user_message=_nonblank_string(row["user_message"], "user_message"),
-                    context=PromptContext.model_validate(row["context"]),
-                    expected_action=row["expected_action"],
-                    expected_tool=row["expected_tool"],
-                    expected_arguments=row["expected_arguments"],
-                    tags=[_nonblank_string(tag, "tag") for tag in row["tags"]],
-                    reason=_nonblank_string(row["reason"], "reason"),
-                )
+                case = SpecialistEvalCase.model_validate(row)
+                if case.case_id in seen_ids:
+                    raise ValueError(f"duplicate case_id: {case.case_id}")
+                if case.specialist not in SPECIALIST_TOOLS:
+                    raise ValueError(f"unsupported specialist: {case.specialist}")
+                if case.expected_action == "tool":
+                    if case.expected_tool not in SPECIALIST_TOOLS[case.specialist]:
+                        raise ValueError(f"unsupported tool for {case.specialist}: {case.expected_tool}")
+                    TOOL_ARGUMENT_MODELS[case.expected_tool].model_validate(case.expected_arguments)
             except (ValueError, TypeError) as exc:
                 raise ValueError(f"{path}:{line_number}: {exc}") from exc
-            seen_ids.add(case_id)
+            seen_ids.add(case.case_id)
             cases.append(case)
     return cases
 

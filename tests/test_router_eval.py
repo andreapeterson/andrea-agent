@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, call
 
 import pytest
 from openai import AsyncOpenAI
+from pydantic import ValidationError
 
 from app.agents.prompt_context import PromptContext
 from app.integrations import HandoffClient, LegacyCRMClient, SchedulerClient
@@ -94,8 +95,10 @@ def test_invalid_json_reports_file_and_line(tmp_path, content) -> None:
 @pytest.mark.parametrize("context", [{"phone_number": "fictional"}, {"customer_verified": "not-a-bool"}, {"routing_result": {"routing_level": "invented", "next_action": "create_handoff"}}, None])
 def test_context_is_validated_by_existing_prompt_context(tmp_path, valid_row, context) -> None:
     valid_row["context"] = context
-    with pytest.raises(ValueError, match="PromptContext"):
+    with pytest.raises(ValueError) as caught:
         load_router_cases(write_rows(tmp_path / "cases.jsonl", valid_row))
+    assert isinstance(caught.value.__cause__, ValidationError)
+    assert caught.value.__cause__.errors()[0]["loc"][0] == "context"
 
 
 def test_duplicate_normalized_case_ids_are_rejected(tmp_path, valid_row) -> None:
@@ -107,7 +110,7 @@ def test_duplicate_normalized_case_ids_are_rejected(tmp_path, valid_row) -> None
 @pytest.mark.parametrize("destination", ["booking", "Policy", "", None, ["policy"]])
 def test_invalid_expected_destinations_are_rejected(tmp_path, valid_row, destination) -> None:
     valid_row["expected_destination"] = destination
-    with pytest.raises(ValueError, match="invalid expected_destination"):
+    with pytest.raises(ValueError, match="expected_destination"):
         load_router_cases(write_rows(tmp_path / "cases.jsonl", valid_row))
 
 
@@ -120,8 +123,10 @@ def test_invalid_expected_destinations_are_rejected(tmp_path, valid_row, destina
 ])
 def test_blank_or_invalid_metadata_is_rejected(tmp_path, valid_row, field, value) -> None:
     valid_row[field] = value
-    with pytest.raises(ValueError, match="nonblank|nonempty"):
+    with pytest.raises(ValueError) as caught:
         load_router_cases(write_rows(tmp_path / "cases.jsonl", valid_row))
+    assert isinstance(caught.value.__cause__, ValidationError)
+    assert caught.value.__cause__.errors()[0]["loc"][0] == field
 
 
 @pytest.mark.parametrize("change", ["missing", "extra", "non_object"])
@@ -132,8 +137,11 @@ def test_invalid_case_shape_is_rejected(tmp_path, valid_row, change) -> None:
         valid_row["unexpected"] = "value"
     else:
         valid_row = [valid_row]
-    with pytest.raises(ValueError, match="exactly these fields"):
+    with pytest.raises(ValueError) as caught:
         load_router_cases(write_rows(tmp_path / "cases.jsonl", valid_row))
+    assert isinstance(caught.value.__cause__, ValidationError)
+    expected_error = {"missing": "missing", "extra": "extra_forbidden", "non_object": "model_type"}[change]
+    assert caught.value.__cause__.errors()[0]["type"] == expected_error
 
 
 @pytest.mark.asyncio

@@ -6,10 +6,11 @@ import argparse
 import asyncio
 import json
 from collections.abc import Awaitable, Callable, Iterable
-from dataclasses import dataclass
 from importlib import import_module
 from pathlib import Path
-from typing import Any, get_args
+from typing import Annotated, Any, get_args
+
+from pydantic import BaseModel, ConfigDict, Field
 
 from app.agents.prompt_context import PromptContext
 from app.agents.router_agent import RouteDecision
@@ -18,20 +19,15 @@ DEFAULT_CASES_PATH = Path(__file__).with_name("router_cases.jsonl")
 DESTINATIONS = get_args(RouteDecision.model_fields["destination"].annotation)
 
 
-@dataclass
-class RouterEvalCase:
-    case_id: str
-    user_message: str
+class RouterEvalCase(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True, str_strip_whitespace=True)
+
+    case_id: str = Field(min_length=1)
+    user_message: str = Field(min_length=1)
     context: PromptContext
-    expected_destination: str
-    tags: list[str]
-    reason: str
-
-
-def _nonblank_string(value: object, field: str) -> str:
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{field} must be a nonblank string")
-    return value.strip()
+    expected_destination: str = Field(min_length=1)
+    tags: list[Annotated[str, Field(min_length=1)]] = Field(min_length=1)
+    reason: str = Field(min_length=1)
 
 
 def _reject_json_constant(value: str) -> None:
@@ -42,34 +38,20 @@ def load_router_cases(path: str | Path = DEFAULT_CASES_PATH) -> list[RouterEvalC
     """Skip whitespace-only lines; reject invalid rows with their file and line number. converts the JSONL file into validated Python objects"""
     cases = []
     seen_ids = set()
-    fields = {"case_id", "user_message", "context", "expected_destination", "tags", "reason"}
     with Path(path).open(encoding="utf-8") as source:
         for line_number, line in enumerate(source, start=1):
             if not line.strip():
                 continue
             try:
                 row = json.loads(line, parse_constant=_reject_json_constant) #json string into python dictionary
-                if not isinstance(row, dict) or set(row) != fields:
-                    raise ValueError(f"each case must contain exactly these fields: {', '.join(sorted(fields))}")
-                case_id = _nonblank_string(row["case_id"], "case_id")
-                if case_id in seen_ids:
-                    raise ValueError(f"duplicate case_id: {case_id}")
-                destination = row["expected_destination"]
-                if destination not in DESTINATIONS:
-                    raise ValueError(f"invalid expected_destination: {destination!r}")
-                if not isinstance(row["tags"], list) or not row["tags"]:
-                    raise ValueError("tags must be a nonempty list of nonblank strings")
-                case = RouterEvalCase(
-                    case_id=case_id,
-                    user_message=_nonblank_string(row["user_message"], "user_message"),
-                    context=PromptContext.model_validate(row["context"]),
-                    expected_destination=destination,
-                    tags=[_nonblank_string(tag, "tag") for tag in row["tags"]],
-                    reason=_nonblank_string(row["reason"], "reason"),
-                )
+                case = RouterEvalCase.model_validate(row)
+                if case.case_id in seen_ids:
+                    raise ValueError(f"duplicate case_id: {case.case_id}")
+                if case.expected_destination not in DESTINATIONS:
+                    raise ValueError(f"invalid expected_destination: {case.expected_destination!r}")
             except (ValueError, TypeError) as exc:
                 raise ValueError(f"{path}:{line_number}: {exc}") from exc
-            seen_ids.add(case_id)
+            seen_ids.add(case.case_id)
             cases.append(case)
     return cases
 

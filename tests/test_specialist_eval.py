@@ -8,6 +8,7 @@ from unittest.mock import AsyncMock, Mock, call
 
 import pytest
 from openai import AsyncOpenAI, OpenAI
+from pydantic import ValidationError
 
 from app.agents.prompt_context import PromptContext
 from app.integrations import HandoffClient, LegacyCRMClient, SchedulerClient
@@ -102,16 +103,16 @@ def test_malformed_json_reports_filename_and_line_number(tmp_path, text) -> None
     ("user_message", "", "user_message"), ("reason", " \n ", "reason"),
     ("tags", [], "tags"), ("tags", "routine", "tags"), ("tags", ["valid", "  "], "tag"),
     ("specialist", "booking", "unsupported specialist"),
-    ("expected_action", "transfer", "action must be"),
+    ("expected_action", "transfer", "expected_action"),
     ("expected_tool", "invented_tool", "unsupported tool"),
     ("expected_tool", "search_policy", "unsupported tool for verification"),
-    ("expected_tool", None, "tool name"),
-    ("expected_arguments", None, "arguments object"),
-    ("expected_arguments", [], "arguments object"),
+    ("expected_tool", None, "expected_tool"),
+    ("expected_arguments", None, "expected_arguments"),
+    ("expected_arguments", [], "expected_arguments"),
     ("expected_arguments", {}, "phone"),
     ("expected_arguments", {"phone": "202-555-0100", "extra": True}, "extra"),
-    ("context", {"customer_id": "not-allowlisted"}, "PromptContext"),
-    ("context", {"customer_verified": "not-a-boolean"}, "PromptContext"),
+    ("context", {"customer_id": "not-allowlisted"}, "context"),
+    ("context", {"customer_verified": "not-a-boolean"}, "context"),
 ])
 def test_malformed_rows_are_rejected_with_line_numbers(tmp_path, valid_row, field, value, error) -> None:
     valid_row[field] = value
@@ -129,8 +130,11 @@ def test_row_requires_exactly_the_declared_fields(tmp_path, valid_row, change) -
         valid_row["unexpected"] = True
     else:
         valid_row = [valid_row]
-    with pytest.raises(ValueError, match="exactly these fields"):
+    with pytest.raises(ValueError) as caught:
         load_specialist_cases(write_rows(tmp_path / "cases.jsonl", valid_row))
+    assert isinstance(caught.value.__cause__, ValidationError)
+    expected_error = {"missing": "missing", "extra": "extra_forbidden", "non_object": "model_type"}[change]
+    assert caught.value.__cause__.errors()[0]["type"] == expected_error
 
 
 @pytest.mark.parametrize("tool, arguments", [("lookup_customer", None), (None, {}), ("lookup_customer", {})])
