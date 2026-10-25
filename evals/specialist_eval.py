@@ -53,7 +53,7 @@ class SpecialistEvalCase(BaseModel):
     tags: list[Annotated[str, Field(min_length=1)]] = Field(min_length=1)
     reason: str = Field(min_length=1)
 
-    @model_validator(mode="after")
+    @model_validator(mode="after") #expected_action, expected_tool, and expected_arguments must be consistent with each other. after individual field validation and model is created, check combo
     def validate_expected_action(self) -> Self:
         if self.expected_action == "speech":
             if self.expected_tool is not None or self.expected_arguments is not None:
