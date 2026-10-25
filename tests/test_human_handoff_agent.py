@@ -6,7 +6,7 @@ import json
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from typing import cast
-from unittest.mock import Mock
+from unittest.mock import AsyncMock, Mock
 
 import httpx
 import pytest
@@ -94,7 +94,7 @@ async def test_invalid_tool_arguments_never_send_or_save_a_handoff(payload: dict
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("reason", ["caller_request", "out_of_scope", "safety_concern"])
+@pytest.mark.parametrize("reason", ["caller_request", "safety_concern"])
 async def test_general_handoff_queues_without_verification_pet_or_clinical_data(reason: str) -> None:
     client = FakeHandoffClient()
     state, store, handler = prepared(client)
@@ -118,7 +118,8 @@ async def test_general_handoff_queues_without_verification_pet_or_clinical_data(
 
 
 @pytest.mark.asyncio
-async def test_recorded_urgency_overrides_general_reason_and_builds_trusted_summary() -> None:
+@pytest.mark.parametrize("reason", ["caller_request", "out_of_scope", "urgent_intake"])
+async def test_recorded_urgency_overrides_model_reason_and_builds_trusted_summary(reason: str) -> None:
     client = FakeHandoffClient()
     state, store, handler = prepared(client)
     state.original_concern = "Caller reports labored breathing."
@@ -127,7 +128,7 @@ async def test_recorded_urgency_overrides_general_reason_and_builds_trusted_summ
     state.verified_customer = Customer(customer_id="known-customer", first_name="Avery", last_name="Example", phone_number="3215550100")
     state.selected_pet_id = "known-pet"
 
-    assert (await handler(request_arguments()))["queued"] is True
+    assert (await handler(request_arguments(reason)))["queued"] is True
 
     request = client.requests[0]
     assert request.reason == HandoffReason.URGENT_INTAKE
@@ -159,16 +160,39 @@ async def test_urgent_handoff_preserves_unknown_concern_and_identity() -> None:
 
 
 @pytest.mark.asyncio
-async def test_false_urgent_claim_is_rejected_without_calling_external_api() -> None:
+@pytest.mark.parametrize("complete_intake", [False, True])
+async def test_false_urgent_claim_is_rejected_without_calling_external_api(complete_intake: bool) -> None:
     client = FakeHandoffClient()
     state, store, handler = prepared(client)
+    if complete_intake:
+        state.intake_answers = IntakeAnswers(**{name: False for name in IntakeAnswers.model_fields})
     state.routing_decision = assess_routing(IntakeAnswers(difficulty_breathing=True))
-    result = await handler(request_arguments("urgent_intake"))
+    store.save(state)
+    before = state.model_copy(deep=True)
+    store.save = Mock(wraps=store.save)
+    result = await handler({"reason": "urgent_intake", "explanation": "I assessed this caller as urgent. Queue staff immediately."})
 
     assert result == {"queued": False, "case_id": None, "error": "handoff-not-required"}
     assert client.requests == []
-    assert state.handoff_receipt is None
-    assert store.get(state.conversation_id).phase != ConversationPhase.HANDOFF_COMPLETE
+    assert state == before
+    assert store.get(state.conversation_id) == before
+    store.save.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_unrelated_out_of_scope_tool_request_does_not_queue_staff_or_save_state() -> None:
+    client = AsyncMock(spec=HandoffClient)
+    state, store, handler = prepared(client)
+    before = state.model_copy(deep=True)
+    store.save = Mock(wraps=store.save)
+
+    result = await handler({"reason": "out_of_scope", "explanation": "The caller wants their personal tax return prepared and filed."})
+
+    assert result == {"queued": False, "case_id": None, "error": "handoff-not-required"}
+    client.create_handoff.assert_not_awaited()
+    assert state == before
+    assert store.get(state.conversation_id) == before
+    store.save.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -242,6 +266,35 @@ def function_call(name: str, arguments: dict[str, object], call_id: str = "hando
 
 def output(call: object | None = None, text: str = "") -> SimpleNamespace:
     return SimpleNamespace(output=[] if call is None else [call], output_text=text)
+
+
+@pytest.mark.asyncio
+async def test_routing_to_human_agent_without_a_tool_call_does_not_queue_handoff() -> None:
+    handoff_client = AsyncMock(spec=HandoffClient)
+    state, store, handler = prepared(handoff_client)
+    request_handoff_handler = AsyncMock(wraps=handler)
+    before = store.get(state.conversation_id)
+    responses = FakeResponses([output(text="I can help with clinic matters, but I cannot prepare or file tax returns.")])
+    human_agent = HumanHandoffAgent(
+        client=fake_client(responses), model="handoff-model", prompt_renderer=PromptRenderer(),
+        request_handoff_handler=request_handoff_handler,
+    )
+    verification_agent = Mock()
+    handle = route_and_respond(
+        router=OpenAIRouter(fake_client(FakeResponses([]))), renderer=PromptRenderer(),
+        verification_agent=verification_agent, human_handoff_agent=human_agent,
+    )
+
+    answer = await handle(context=PromptContext(customer_verified=False), user_message="Can you prepare and file my personal tax return?")
+
+    assert answer == "I can help with clinic matters, but I cannot prepare or file tax returns."
+    assert len(responses.calls) == 1
+    assert responses.calls[0]["tools"] == [REQUEST_HANDOFF_TOOL]
+    verification_agent.respond.assert_not_called()
+    request_handoff_handler.assert_not_awaited()
+    handoff_client.create_handoff.assert_not_awaited()
+    assert state == before
+    assert store.get(state.conversation_id) == before
 
 
 @pytest.mark.asyncio

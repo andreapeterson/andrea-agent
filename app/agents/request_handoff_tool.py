@@ -59,6 +59,9 @@ def create_request_handoff_handler(
         urgent = decision.routing_level == RoutingLevel.URGENT
         if validated.reason == HandoffReason.URGENT_INTAKE and not urgent: #if model is requesting an urgent intake handoff, but the recorded answers aren’t urgent, reject it
             return {"queued": False, "case_id": None, "error": "handoff-not-required"}
+        # An out-of-scope topic alone does not authorize queuing clinic staff.
+        if validated.reason == HandoffReason.OUT_OF_SCOPE and not urgent:
+            return {"queued": False, "case_id": None, "error": "handoff-not-required"}
 
         reason = HandoffReason.URGENT_INTAKE if urgent else validated.reason #if recorded answers are urgent, override the model's reason to be URGENT_INTAKE
         concern = (conversation_state.original_concern or "").strip() or None
