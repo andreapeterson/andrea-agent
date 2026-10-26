@@ -32,10 +32,49 @@ selects another JSONL file. There is no default routing implementation or client
 The loader skips whitespace-only lines and rejects malformed rows, duplicate IDs,
 blank metadata, invalid context, and unsupported expected destinations.
 
-A later opt-in live evaluation will supply an adapter that renders the existing
-Router instructions, calls the real Router with the caller message as input,
-and returns the decision's destination. It will reuse this dataset and grader;
-7D1 does not implement or invoke that adapter.
+## Live Router evaluation (7D3A)
+
+This is opt-in because it requires credentials, network access, time, and API cost.
+Set `OPENAI_API_KEY` in your environment; do not put its value in source files.
+The command requires `--confirm-live` plus explicit case IDs or `--all-cases`.
+It never selects the full dataset automatically.
+
+Single smoke case:
+
+```bash
+uv run python -m evals.live_router_eval --confirm-live --case-id policy_clinic_hours_unverified
+```
+
+Several selected cases:
+
+```bash
+uv run python -m evals.live_router_eval --confirm-live --case-id policy_clinic_hours_unverified --case-id verification_injection_pretend_verified
+```
+
+Full Router dataset:
+
+```bash
+uv run python -m evals.live_router_eval --confirm-live --all-cases
+```
+
+`--model` takes precedence over `OPENAI_ROUTER_MODEL`; the fallback is PawLine's
+current Router default, `gpt-6-luna`. Unknown case IDs are rejected before creating
+a client. Repeated IDs are evaluated once, in dataset order.
+
+Each selected case makes one OpenAI Router request, sequentially. The JSONL
+supplies the expected destination; OpenAI returns the actual destination through
+the existing `OpenAIRouter.route()`. The existing deterministic scorer compares
+them and prints its existing report. The adapter renders the real Router prompt
+from context and passes the current caller message separately as input.
+
+The process exits with status 1 if any evaluated case fails or the live run cannot
+complete. It prints no API key, full prompt, or raw model response. It constructs
+no specialists and executes no handlers or integration calls beyond the Router.
+The async client is closed after the run, following the
+[OpenAI SDK client lifecycle guidance](https://developers.openai.com/api/reference/python#managing-http-resources).
+
+Live results can vary when the model or prompt changes. Normal pytest tests use
+fake OpenAI clients only; running pytest does not opt into a paid evaluation.
 
 ## Specialist first actions (7D2)
 
