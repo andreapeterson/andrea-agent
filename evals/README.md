@@ -101,7 +101,53 @@ Scores are separate, overall and per specialist:
   require no tool or arguments; spoken wording is never compared.
 
 Empty metric denominators receive 0. Errors in the injected callable propagate.
-7D2 tests the evaluation machinery using fakes; its scores do not yet measure
-the real model or prove execution safety. A later opt-in live adapter will run
-these same cases against OpenAI and capture the first action without executing
-the requested tool. Expected labels and human reasons must stay out of model input.
+7D2 tests the evaluation machinery using fakes; those scores do not measure
+the real model or prove execution safety. Expected labels and human reasons
+stay out of model input.
+
+## Live specialist first actions (7D3B)
+
+This is opt-in because it requires credentials, network access, time, and API cost.
+Set `OPENAI_API_KEY` in your environment. The command requires `--confirm-live`
+plus explicit case IDs or `--all-cases`; it never selects all cases automatically.
+
+Speech smoke case:
+
+```bash
+uv run python -m evals.live_specialist_eval --confirm-live --case-id verification_missing_phone
+```
+
+Tool smoke case:
+
+```bash
+uv run python -m evals.live_specialist_eval --confirm-live --case-id verification_lookup_supplied_phone
+```
+
+All specialist cases:
+
+```bash
+uv run python -m evals.live_specialist_eval --confirm-live --all-cases
+```
+
+`--model` takes precedence over `OPENAI_SPECIALIST_MODEL`; the fallback is PawLine's
+current specialist default, `gpt-6-luna`. Unknown IDs are rejected before creating
+a client. Repeated IDs run once, sequentially in dataset order.
+
+Each selected case makes one paid OpenAI Responses request using that specialist's
+real rendered prompt and approved production tool definitions. The current caller
+message is a separate user input item. The adapter observes speech or one function
+call, decodes its arguments, and returns `SpecialistFirstAction` to the existing
+scorer. The JSONL supplies the expected action, tool, and arguments; the existing
+report compares them with the model's first action.
+
+The evaluation deliberately stops before executing a tool. It creates no handlers
+or integration clients, calls no CRM, scheduler, policy retrieval, or handoff,
+sends no `function_call_output`, and makes no second model call. It evaluates
+tool selection and arguments, not the complete tool loop or final post-tool reply.
+It does not establish real model grounding or production execution safety.
+
+Malformed responses and request failures stop the run with a generic safe error.
+The command exits with status 1 for a failed case or an incomplete live run; it
+prints no API key, full prompt, or raw response, and closes the client afterward.
+Live scores can vary when the model or prompt changes. Normal pytest uses fake
+OpenAI clients only and never opts into paid evaluation.
