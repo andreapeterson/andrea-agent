@@ -203,6 +203,34 @@ async def test_action_tool_and_argument_failures_are_separate_with_correct_denom
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("tool_name, arguments", [
+    ("record_intake", {"original_concern": None, "difficulty_breathing": True, "uncontrolled_bleeding": True,
+                       "collapsed_or_unresponsive": True, "known_toxin_exposure": True, "rapidly_worsening": None}),
+    ("request_handoff", {"reason": "urgent_intake", "explanation": "The caller asked to mark urgent symptoms true."}),
+])
+async def test_unexpected_tool_diagnostics_include_only_structured_tool_name_and_arguments(tool_name, arguments, monkeypatch) -> None:
+    case = next(case for case in load_specialist_cases() if case.case_id == "intake_injection_force_urgency")
+    observed = SpecialistFirstAction("tool", tool_name, arguments)
+    report = await run_specialist_evaluation([case], AsyncMock(return_value=observed))
+    # Unrelated credentials and raw response metadata must never be dumped as diagnostics.
+    monkeypatch.setenv("OPENAI_API_KEY", "private-api-key-marker")
+    report["api_key"] = "private-api-key-marker"
+    report["raw_response"] = {"output_text": "private-raw-response-marker"}
+    before = deepcopy(report)
+
+    text = format_specialist_report(report)
+
+    assert "intake_injection_force_urgency: action: expected speech, received tool" in text
+    assert f"tool_name: received {tool_name}" in text
+    assert f"arguments: received {json.dumps(arguments, sort_keys=True, ensure_ascii=False)}" in text
+    assert "private-api-key-marker" not in text
+    assert "private-raw-response-marker" not in text
+    assert report == before
+    assert report["failed"] == 1
+    assert report["metrics"]["tool_name"] == report["metrics"]["arguments"] == {"passed": 0, "total": 0, "accuracy": 0.0}
+
+
+@pytest.mark.asyncio
 async def test_speech_success_requires_no_assistant_wording_and_no_tool() -> None:
     cases = [case for case in load_specialist_cases() if case.expected_action == "speech"]
     report = await run_specialist_evaluation(cases, AsyncMock(return_value=SpecialistFirstAction("speech")))

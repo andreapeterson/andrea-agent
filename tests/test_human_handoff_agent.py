@@ -290,6 +290,8 @@ async def test_routing_to_human_agent_without_a_tool_call_does_not_queue_handoff
     assert answer == "I can help with clinic matters, but I cannot prepare or file tax returns."
     assert len(responses.calls) == 1
     assert responses.calls[0]["tools"] == [REQUEST_HANDOFF_TOOL]
+    assert "give a brief, professional boundary response and offer to help with supported clinic matters" in responses.calls[0]["instructions"]
+    assert "Do not call request_handoff solely because a request is unrelated" in responses.calls[0]["instructions"]
     verification_agent.respond.assert_not_called()
     request_handoff_handler.assert_not_awaited()
     handoff_client.create_handoff.assert_not_awaited()
@@ -370,6 +372,46 @@ async def test_intake_records_then_requests_handoff_with_the_same_shared_handler
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("agent_type", [HumanHandoffAgent, IntakeAgent])
+async def test_mocked_agents_can_request_handoff_from_trusted_urgent_context(agent_type) -> None:
+    handoff_client = FakeHandoffClient()
+    state, store, handler = prepared(handoff_client)
+    state.original_concern = "Maize is having difficulty breathing."
+    state.intake_answers = IntakeAnswers(difficulty_breathing=True)
+    state.routing_decision = assess_routing(state.intake_answers)
+    store.save(state)
+    request_handler = AsyncMock(wraps=handler)
+    record_handler = AsyncMock(side_effect=AssertionError("Already recorded urgent intake must not restart intake"))
+    responses = FakeResponses([
+        output(function_call("request_handoff", request_arguments("urgent_intake"))),
+        output(text="Your request for human assistance is queued."),
+    ])
+    kwargs = {
+        "client": fake_client(responses), "model": "specialist-test-model",
+        "prompt_renderer": PromptRenderer(), "request_handoff_handler": request_handler,
+    }
+    if agent_type is IntakeAgent:
+        kwargs["record_intake_handler"] = record_handler
+    agent = agent_type(**kwargs)
+    context = PromptContext(
+        original_concern=state.original_concern, intake_answers=state.intake_answers,
+        routing_result=state.routing_decision,
+    )
+
+    answer = await agent.respond(context=context, user_message="Okay, what happens next?")
+
+    assert answer == "Your request for human assistance is queued."
+    assert len(responses.calls) == 2
+    assert "trusted recorded urgent intake" in responses.calls[0]["instructions"] or "urgency supported by trusted recorded intake" in responses.calls[0]["instructions"]
+    request_handler.assert_awaited_once_with(request_arguments("urgent_intake"))
+    record_handler.assert_not_awaited()
+    assert len(handoff_client.requests) == 1
+    assert handoff_client.requests[0].reason == HandoffReason.URGENT_INTAKE
+    assert handoff_client.requests[0].intake_answers.difficulty_breathing is True
+    assert store.get(state.conversation_id).phase == ConversationPhase.HANDOFF_COMPLETE
+
+
+@pytest.mark.asyncio
 async def test_handoff_service_failure_is_sent_back_in_next_model_request() -> None:
     _, _, handler = prepared(FakeHandoffClient(error=HandoffRequestError("secret failure")))
     responses = FakeResponses([output(function_call("request_handoff", request_arguments())), output(text="I could not queue your request.")])
@@ -397,6 +439,20 @@ def test_handoff_prompt_and_known_urgent_router_priority() -> None:
     intake = PromptRenderer().render_intake(context)
     assert "call request_handoff with reason urgent_intake" in intake
     assert "stop the routine questionnaire" in intake
+
+
+def test_handoff_prompt_and_tool_description_reserve_handoff_for_supported_requests() -> None:
+    prompt = PromptRenderer().render_human_handoff(PromptContext())
+    assert "give a brief, professional boundary response and offer to help with supported clinic matters" in prompt
+    assert "Do not call request_handoff solely because a request is unrelated" in prompt
+    assert "Call request_handoff only for an explicit request to speak with a person, a supported safety concern, or trusted recorded urgent intake" in prompt
+    assert "Use caller_request, safety_concern, or urgent_intake as the reason" in prompt
+    assert "Call request_handoff for an explicit human request, an out-of-scope request" not in prompt
+    description = REQUEST_HANDOFF_TOOL["description"]
+    assert "explicit request to speak with a person" in description
+    assert "a supported safety concern, or trusted recorded urgent intake" in description
+    assert "unsupported request alone does not authorize a handoff" in description
+    assert "Python uses trusted conversation state and reassesses urgency" in description
 
 
 def test_human_handoff_renderer_reports_template_error(tmp_path) -> None:

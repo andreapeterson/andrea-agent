@@ -33,8 +33,9 @@ REQUEST_HANDOFF_TOOL: dict[str, object] = {
     "type": "function",
     "name": "request_handoff",
     "description": (
-        "Request human assistance for an explicit caller request, an out-of-scope request, "
-        "a safety concern, or urgent recorded intake. Python uses trusted conversation state "
+        "Request human assistance for an explicit request to speak with a person, "
+        "a supported safety concern, or trusted recorded urgent intake. An unrelated "
+        "unsupported request alone does not authorize a handoff. Python uses trusted conversation state "
         "and reassesses urgency. Success means the request is queued, not a live transfer."
     ),
     "strict": True,

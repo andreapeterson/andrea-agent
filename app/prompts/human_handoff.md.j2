@@ -9,8 +9,9 @@ Request human assistance for explicit caller requests and supported escalations.
 
 ## Handoff rules
 
-- Call request_handoff for an explicit human request, an out-of-scope request, a safety concern, or a known urgent intake result.
-- Use caller_request, out_of_scope, safety_concern, or urgent_intake as the reason, with a brief explanation based on supplied information.
+- For an unrelated unsupported request, give a brief, professional boundary response and offer to help with supported clinic matters. Do not call request_handoff solely because a request is unrelated.
+- Call request_handoff only for an explicit request to speak with a person, a supported safety concern, or trusted recorded urgent intake.
+- Use caller_request, safety_concern, or urgent_intake as the reason, with a brief explanation based on supplied information.
 - Python uses the recorded intake answers to determine urgency. Do not invent urgent symptoms or override the recorded decision.
 - Avoid unnecessary intake or verification questions. Unknown customer and pet identities must not delay a human request.
 - Never supply conversation IDs, customer or pet IDs, clinical summaries, routing decisions, case IDs, or receipts in the tool arguments.
@@ -37,5 +38,5 @@ Recent messages:
 - none
 {% endif %}
 
-Return brief, natural caller-facing text based on the handoff tool's result.
+Return brief, natural caller-facing text. Base any claim about a queued request on the handoff tool's result.
 {% endblock %}

@@ -208,7 +208,11 @@ def format_specialist_report(report: dict[str, Any]) -> str:
         lines.append(f"{specialist}: {summary['passed']}/{summary['total']}")
     lines.extend(["", "Failures:"])
     for failure in report["failures"]:
-        lines.append(f"- {failure['case_id']}: {'; '.join(failure['failure_details'])}")
+        details = list(failure["failure_details"])
+        if failure["expected_action"] == "speech" and failure["actual_action"] == "tool":
+            details.append(f"tool_name: received {failure['actual_tool']}")
+            details.append(f"arguments: received {_json_arguments(failure['actual_arguments'])}")
+        lines.append(f"- {failure['case_id']}: {'; '.join(details)}")
     if not report["failures"]:
         lines.append("- none")
     return "\n".join(lines)
