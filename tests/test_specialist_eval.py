@@ -215,6 +215,46 @@ async def test_speech_success_requires_no_assistant_wording_and_no_tool() -> Non
 
 
 @pytest.mark.asyncio
+async def test_speech_only_report_formats_inapplicable_metrics_without_changing_numbers() -> None:
+    case = next(case for case in load_specialist_cases() if case.case_id == "verification_missing_phone")
+    report = await run_specialist_evaluation([case], AsyncMock(return_value=SpecialistFirstAction("speech")))
+    before = deepcopy(report)
+
+    text = format_specialist_report(report)
+
+    assert "action: 1/1 (100.0%)" in text
+    assert "complete_case: 1/1 (100.0%)" in text
+    assert "tool_name: N/A (0 applicable cases)" in text
+    assert "arguments: N/A (0 applicable cases)" in text
+    assert report == before
+    assert report["metrics"] == {
+        "action": {"passed": 1, "total": 1, "accuracy": 1.0},
+        "tool_name": {"passed": 0, "total": 0, "accuracy": 0.0},
+        "arguments": {"passed": 0, "total": 0, "accuracy": 0.0},
+        "complete_case": {"passed": 1, "total": 1, "accuracy": 1.0},
+    }
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("correct_arguments", [True, False])
+async def test_tool_report_preserves_percentages_without_changing_numbers(correct_arguments) -> None:
+    case = next(case for case in load_specialist_cases() if case.case_id == "verification_lookup_supplied_phone")
+    arguments = case.expected_arguments if correct_arguments else {"phone": "202-555-0199"}
+    observed = SpecialistFirstAction("tool", case.expected_tool, arguments)
+    report = await run_specialist_evaluation([case], AsyncMock(return_value=observed))
+    before = deepcopy(report)
+
+    text = format_specialist_report(report)
+
+    assert "N/A" not in text
+    for name in ("action", "tool_name", "arguments", "complete_case"):
+        passed = 1 if name in {"action", "tool_name"} or correct_arguments else 0
+        assert f"{name}: {passed}/1 ({passed:.1%})" in text
+        assert report["metrics"][name] == {"passed": passed, "total": 1, "accuracy": float(passed)}
+    assert report == before
+
+
+@pytest.mark.asyncio
 async def test_argument_comparison_ignores_key_order_but_not_json_types() -> None:
     cases = {case.case_id: case for case in load_specialist_cases()}
     intake = cases["intake_record_concern_and_answer"]

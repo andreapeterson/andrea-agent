@@ -199,7 +199,10 @@ def format_specialist_report(report: dict[str, Any]) -> str:
         f"Passed: {report['passed']}", f"Failed: {report['failed']}", "", "Scores:",
     ]
     for name, metric in report["metrics"].items():
-        lines.append(f"{name}: {metric['passed']}/{metric['total']} ({metric['accuracy']:.1%})")
+        if metric["total"] == 0:
+            lines.append(f"{name}: N/A (0 applicable cases)")
+        else:
+            lines.append(f"{name}: {metric['passed']}/{metric['total']} ({metric['accuracy']:.1%})")
     lines.extend(["", "By specialist:"])
     for specialist, summary in report["by_specialist"].items():
         lines.append(f"{specialist}: {summary['passed']}/{summary['total']}")

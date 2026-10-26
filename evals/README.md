@@ -100,7 +100,9 @@ Scores are separate, overall and per specialist:
 - **Complete-case accuracy:** every applicable check must pass. Speech cases
   require no tool or arguments; spoken wording is never compared.
 
-Empty metric denominators receive 0. Errors in the injected callable propagate.
+Empty metric denominators retain numeric accuracy 0 in the report dictionary.
+Terminal scores display `N/A (0 applicable cases)` when the selected cases did
+not require that check. Errors in the injected callable propagate.
 7D2 tests the evaluation machinery using fakes; those scores do not measure
 the real model or prove execution safety. Expected labels and human reasons
 stay out of model input.
