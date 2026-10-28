@@ -109,14 +109,20 @@ stay out of the specialist's model input.
 ### Exact and semantic argument grading
 
 Tool names, argument keys and structure, JSON types, phone numbers, IDs, booleans,
-enum values (including `request_handoff.reason`), all intake fields, and scheduling
-and booking arguments remain exact. Object key order is ignored. No business
-values are normalized or approved by the semantic judge.
+enum values (including `request_handoff.reason`), intake answers, and scheduling
+and booking arguments remain exact. Object key order is ignored.
+
+Only `record_intake.original_concern` receives limited deterministic normalization:
+trim surrounding whitespace, collapse repeated internal whitespace, and remove
+terminal sentence marks (`.`, `!`, `?`). The remaining text is compared exactly.
+Words, case, and internal punctuation still matter; paraphrases and inferred
+diagnoses fail. This field never goes to the semantic judge.
 
 Only `search_policy.query` and `request_handoff.explanation` can receive semantic
 grading. Pass an async `semantic_grader(case, field, expected_text, actual_text)`
 returning `SemanticGrade(equivalent, reason)` to `run_specialist_evaluation`.
-Without an injected grader, the offline scorer retains exact JSON comparison.
+Without an injected grader, the offline scorer retains exact JSON comparison
+apart from the limited concern normalization above.
 It never constructs an OpenAI client; offline tests inject fake graders.
 
 The grader is called only when an approved nonblank string differs exactly,
@@ -126,8 +132,23 @@ if every exact check passes and the prose preserves the same operational meaning
 without adding facts unsupported by the caller message or recorded context.
 For example, paraphrasing clinic hours can pass; switching to prices cannot.
 A changed handoff reason fails without asking the judge to approve the explanation.
+For handoff explanations, the reference specifies required operational meaning,
+not a maximum permitted wording. Additional language may be accepted when directly
+supported by the caller message, trusted context, or exact structured arguments.
+Recorded urgent intake with `reason=urgent_intake` supports saying urgent human
+assistance is required. The reason alone does not establish clinical urgency.
+Diagnoses and treatment claims are rejected. Invented symptoms, identities,
+outcomes, and other unsupported additions still fail.
 Semantic failures include the field name and the judge's short reason.
 Judge errors propagate and abort evaluation rather than counting as model failures.
+
+Semantic judge context is field-specific. Policy-query grading receives an empty
+context: only the current caller question and expected/actual queries are used,
+with no conversation identity, pet, concern, intake, or routing data. Handoff
+explanation grading receives only present trusted facts: `customer_first_name`,
+`known_pets`, `selected_pet`, `original_concern`, non-null intake answers, and
+`routing_level`. Null/default values and unrelated context are omitted. Unknown
+semantic tool/field combinations raise an evaluation configuration error.
 
 Semantic grading is evaluation-only. It changes no production agents, prompts,
 tools, handlers, or expected dataset wording.
@@ -172,10 +193,13 @@ prose field that passes the exact checks adds one paid judge request, with extra
 latency and API cost (currently at most one judge request per selected case).
 `OPENAI_EVAL_JUDGE_MODEL` selects the judge model; otherwise it uses the configured
 live specialist model. The judge receives the expected and actual text, caller
-message, and allowlisted context as untrusted user data, separate from its grading
+message, field-specific context described above, and (for handoff explanations)
+the exact handoff reason as user data, separate from its grading
 instructions. It uses a small `SemanticGrade` schema through
 [Responses structured parsing](https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=responses).
 It checks operational meaning and unsupported added facts, without executing tools.
+Conversation history, appointment data, tool lists, and internal routing details
+are omitted from the judge's context.
 
 The evaluation deliberately stops before executing a tool. It creates no handlers
 or integration clients, calls no CRM, scheduler, policy retrieval, or handoff,

@@ -297,6 +297,73 @@ async def test_argument_comparison_ignores_key_order_but_not_json_types() -> Non
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("expected_text, actual_text, passes", [
+    ("Maize has been coughing.", "Maize has been coughing", True),
+    ("Maize has been coughing.", "  Maize  has\t been\n coughing.  ", True),
+    ("  Maize\t has  been coughing?!  ", "Maize has been coughing", True),
+    ("Maize has been coughing.", "Maize has been coughing!?", True),
+    ("Maize has been coughing.", "Maize has pneumonia", False),
+    ("Maize has been coughing.", "Maize has been coughing severely.", False),
+    ("Maize has been coughing.", "Maize has coughing.", False),
+    ("Maize has been coughing since yesterday.", "Maize has been coughing", False),
+    ("Maize has been coughing.", "Maize has not been coughing.", False),
+    ("Maize has been coughing.", "Maize has, been coughing.", False),
+    ("Maize has been coughing, especially today.", "Maize has been coughing especially today.", False),
+    ("Maize has been coughing.", "Maize has. been coughing.", False),
+    ("Maize has been coughing.", "Maize has been coughing,", False),
+    ("Maize has been coughing.", "maize has been coughing.", False),
+    ("Maize has been coughing.", None, False),
+    ("Maize has been coughing.", {"text": "Maize has been coughing."}, False),
+])
+async def test_original_concern_normalizes_only_whitespace_and_terminal_sentence_marks(expected_text, actual_text, passes) -> None:
+    original = next(case for case in load_specialist_cases() if case.case_id == "intake_record_concern_and_answer")
+    case = original.model_copy(update={"expected_arguments": {**original.expected_arguments, "original_concern": expected_text}})
+    observed = SpecialistFirstAction("tool", "record_intake", {**case.expected_arguments, "original_concern": actual_text})
+    before = deepcopy((case, observed))
+    judge = AsyncMock(side_effect=AssertionError("Original concern must never reach the semantic grader"))
+
+    report = await run_specialist_evaluation([case], AsyncMock(return_value=observed), semantic_grader=judge)
+
+    assert report["results"][0]["checks"]["arguments"] is passes
+    assert report["results"][0]["passed"] is passes
+    assert report["results"][0]["expected_arguments"]["original_concern"] == expected_text
+    assert report["results"][0]["actual_arguments"]["original_concern"] == actual_text
+    assert (case, observed) == before
+    judge.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_original_concern_normalization_works_without_a_semantic_grader() -> None:
+    case = next(case for case in load_specialist_cases() if case.case_id == "intake_record_concern_and_answer")
+    observed = SpecialistFirstAction("tool", "record_intake", {**case.expected_arguments, "original_concern": "Maize has been coughing"})
+    report = await run_specialist_evaluation([case], AsyncMock(return_value=observed))
+    assert report["passed"] == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("invalid", ["changed_boolean", "numeric_boolean", "missing_field", "extra_field"])
+async def test_concern_normalization_preserves_exact_intake_fields_and_structure(invalid) -> None:
+    case = next(case for case in load_specialist_cases() if case.case_id == "intake_record_concern_and_answer")
+    actual = {**case.expected_arguments, "original_concern": "  Maize has  been coughing  "}
+    if invalid == "changed_boolean":
+        actual["difficulty_breathing"] = True
+    elif invalid == "numeric_boolean":
+        actual["difficulty_breathing"] = 0
+    elif invalid == "missing_field":
+        actual.pop("original_concern")
+    else:
+        actual["extra"] = "unexpected"
+    judge = AsyncMock(side_effect=AssertionError("Intake arguments must not reach the semantic grader"))
+
+    report = await run_specialist_evaluation(
+        [case], AsyncMock(return_value=SpecialistFirstAction("tool", "record_intake", actual)), semantic_grader=judge,
+    )
+
+    assert report["failed"] == 1
+    judge.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("case_id, field, paraphrase", [
     ("policy_search_clinic_hours", "query", "What are the clinic's hours of operation?"),
     ("handoff_explicit_person_request", "explanation", "The caller asked to speak with someone at the clinic."),

@@ -104,6 +104,15 @@ def _json_arguments(arguments: dict[str, object] | None) -> str:
     return json.dumps(arguments, sort_keys=True, ensure_ascii=False, allow_nan=False)
 
 
+def _normalized_intake_arguments(arguments: dict[str, object]) -> dict[str, object]:
+    """Normalize only concern whitespace and terminal sentence marks (.!?)."""
+    normalized = dict(arguments)
+    concern = normalized.get("original_concern")
+    if isinstance(concern, str):
+        normalized["original_concern"] = " ".join(concern.split()).rstrip(".!?")
+    return normalized
+
+
 def _validate_action(action: str, tool: str | None, arguments: dict[str, object] | None) -> None:
     if action not in ("tool", "speech"):
         raise ValueError("action must be tool or speech")
@@ -165,6 +174,13 @@ async def _grade_arguments(
     expected, actual = case.expected_arguments, observed.arguments
     if _json_arguments(actual) == _json_arguments(expected):
         return True, []
+    if (
+        case.expected_tool == observed.tool_name == "record_intake"
+        and expected is not None and actual is not None
+    ):
+        normalized_expected = _json_arguments(_normalized_intake_arguments(expected))
+        normalized_actual = _json_arguments(_normalized_intake_arguments(actual))
+        return normalized_actual == normalized_expected, []
     field = SEMANTIC_ARGUMENT_FIELDS.get(case.expected_tool)
     if (
         semantic_grader is None or field is None or observed.tool_name != case.expected_tool
