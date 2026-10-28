@@ -19,6 +19,7 @@ from evals.specialist_eval import (
     DEFAULT_CASES_PATH,
     SPECIALIST_TOOLS,
     TOOL_ARGUMENT_MODELS,
+    SemanticGrade,
     SpecialistFirstAction,
     format_specialist_report,
     load_specialist_cases,
@@ -293,6 +294,162 @@ async def test_argument_comparison_ignores_key_order_but_not_json_types() -> Non
     report = await run_specialist_evaluation([booking], AsyncMock(return_value=SpecialistFirstAction("tool", "book_selected_appointment", {"confirmed_by_caller": 1})))
     assert report["metrics"]["arguments"]["accuracy"] == 0.0
     assert report["passed"] == 0  # Python dict equality would incorrectly treat 1 as True.
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case_id, field, paraphrase", [
+    ("policy_search_clinic_hours", "query", "What are the clinic's hours of operation?"),
+    ("handoff_explicit_person_request", "explanation", "The caller asked to speak with someone at the clinic."),
+])
+async def test_approved_prose_paraphrases_pass_with_an_injected_judge(case_id, field, paraphrase) -> None:
+    case = next(case for case in load_specialist_cases() if case.case_id == case_id)
+    before = case.model_copy(deep=True)
+    actual = {**case.expected_arguments, field: paraphrase}
+    observed = SpecialistFirstAction("tool", case.expected_tool, actual)
+    judge = AsyncMock(return_value=SemanticGrade(equivalent=True, reason="Same operational meaning without new facts."))
+
+    report = await run_specialist_evaluation([case], AsyncMock(return_value=observed), semantic_grader=judge)
+
+    judge.assert_awaited_once_with(case, field, case.expected_arguments[field], paraphrase)
+    assert report["passed"] == 1
+    assert all(metric == {"passed": 1, "total": 1, "accuracy": 1.0} for metric in report["metrics"].values())
+    assert report["results"][0]["actual_arguments"] == actual
+    assert case == before
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case_id, field, actual_text, reason", [
+    ("policy_search_clinic_hours", "query", "How much do appointments cost?", "The query asks about prices instead of clinic hours."),
+    ("handoff_explicit_person_request", "explanation", "The caller asked for staff because Maize collapsed.", "The caller did not report a collapse."),
+])
+async def test_different_topics_and_unsupported_facts_fail_with_field_diagnostics(case_id, field, actual_text, reason) -> None:
+    case = next(case for case in load_specialist_cases() if case.case_id == case_id)
+    observed = SpecialistFirstAction("tool", case.expected_tool, {**case.expected_arguments, field: actual_text})
+    judge = AsyncMock(return_value=SemanticGrade(equivalent=False, reason=reason))
+
+    report = await run_specialist_evaluation([case], AsyncMock(return_value=observed), semantic_grader=judge)
+
+    assert report["results"][0]["checks"] == {"action": True, "tool_name": True, "arguments": False, "complete_case": False}
+    assert f"{case.expected_tool}.{field}: {reason}" in format_specialist_report(report)
+    judge.assert_awaited_once_with(case, field, case.expected_arguments[field], actual_text)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case_id, field, wrong_value", [
+    ("verification_lookup_supplied_phone", "phone", "2025550142"),
+    ("scheduling_find_selected_pet", "pet_reference", "pet-1"),
+    ("scheduling_select_offered_slot", "slot_id", "demo-slot-1"),
+    ("scheduling_confirm_selected_appointment", "confirmed_by_caller", False),
+    ("scheduling_confirm_selected_appointment", "confirmed_by_caller", 1),
+    ("intake_record_concern_and_answer", "difficulty_breathing", True),
+    ("intake_record_concern_and_answer", "difficulty_breathing", 0),
+    ("intake_record_concern_and_answer", "original_concern", "Maize has a cough."),
+    ("handoff_explicit_person_request", "reason", "urgent_intake"),
+])
+async def test_business_arguments_remain_exact_even_with_an_approving_judge(case_id, field, wrong_value) -> None:
+    case = next(case for case in load_specialist_cases() if case.case_id == case_id)
+    actual = {**case.expected_arguments, field: wrong_value}
+    if case.expected_tool == "request_handoff":
+        actual["explanation"] = "The caller asked to speak with someone at the clinic."
+    judge = AsyncMock(return_value=SemanticGrade(equivalent=True, reason="Equivalent prose."))
+
+    report = await run_specialist_evaluation(
+        [case], AsyncMock(return_value=SpecialistFirstAction("tool", case.expected_tool, actual)), semantic_grader=judge,
+    )
+
+    assert report["results"][0]["checks"]["arguments"] is False
+    assert report["failed"] == 1
+    judge.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_exact_matches_never_invoke_semantic_grading() -> None:
+    cases = load_specialist_cases()
+    judge = AsyncMock(side_effect=AssertionError("Exact matches must not need a judge"))
+
+    report = await run_specialist_evaluation(
+        cases, AsyncMock(side_effect=[matching_action(case) for case in cases]), semantic_grader=judge,
+    )
+
+    assert report["passed"] == 15
+    judge.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case_id, field", [
+    ("policy_search_clinic_hours", "query"), ("handoff_explicit_person_request", "explanation"),
+])
+@pytest.mark.parametrize("invalid", ["missing", "extra", "nested", "number", "blank"])
+async def test_semantic_grading_cannot_relax_keys_structure_or_field_types(case_id, field, invalid) -> None:
+    case = next(case for case in load_specialist_cases() if case.case_id == case_id)
+    actual = dict(case.expected_arguments)
+    if invalid == "missing":
+        actual.pop(field)
+    elif invalid == "extra":
+        actual["unexpected"] = "extra field"
+        actual[field] = "A paraphrase requiring a judge."
+    else:
+        actual[field] = {"nested": {"text": actual[field]}, "number": 5, "blank": "  "}[invalid]
+    judge = AsyncMock(return_value=SemanticGrade(equivalent=True, reason="Equivalent prose."))
+
+    report = await run_specialist_evaluation(
+        [case], AsyncMock(return_value=SpecialistFirstAction("tool", case.expected_tool, actual)), semantic_grader=judge,
+    )
+
+    assert report["failed"] == 1
+    assert report["metrics"]["arguments"]["accuracy"] == 0.0
+    judge.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_tool_names_remain_exact_and_cannot_be_judged_as_paraphrases() -> None:
+    case = next(case for case in load_specialist_cases() if case.case_id == "policy_search_clinic_hours")
+    observed = SpecialistFirstAction("tool", "SEARCH_POLICY", {"query": "What are the clinic's hours of operation?"})
+    judge = AsyncMock(return_value=SemanticGrade(equivalent=True, reason="Equivalent prose."))
+
+    report = await run_specialist_evaluation([case], AsyncMock(return_value=observed), semantic_grader=judge)
+
+    assert report["results"][0]["checks"] == {"action": True, "tool_name": False, "arguments": False, "complete_case": False}
+    judge.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_offline_prose_comparison_stays_exact_without_an_injected_judge() -> None:
+    case = next(case for case in load_specialist_cases() if case.case_id == "policy_search_clinic_hours")
+    observed = SpecialistFirstAction("tool", "search_policy", {"query": "What are the clinic's hours of operation?"})
+    report = await run_specialist_evaluation([case], AsyncMock(return_value=observed))
+    assert report["metrics"]["arguments"]["accuracy"] == 0.0
+
+
+@pytest.mark.asyncio
+async def test_semantic_judge_errors_propagate_instead_of_becoming_failed_scores() -> None:
+    case = next(case for case in load_specialist_cases() if case.case_id == "policy_search_clinic_hours")
+    observed = SpecialistFirstAction("tool", "search_policy", {"query": "What are the clinic's hours of operation?"})
+    error = RuntimeError("Judge unavailable")
+
+    with pytest.raises(RuntimeError) as caught:
+        await run_specialist_evaluation([case], AsyncMock(return_value=observed), semantic_grader=AsyncMock(side_effect=error))
+
+    assert caught.value is error
+
+
+@pytest.mark.asyncio
+async def test_semantic_judge_must_return_the_structured_grade() -> None:
+    case = next(case for case in load_specialist_cases() if case.case_id == "policy_search_clinic_hours")
+    observed = SpecialistFirstAction("tool", "search_policy", {"query": "What are the clinic's hours of operation?"})
+    with pytest.raises(TypeError, match="semantic_grader must return SemanticGrade"):
+        await run_specialist_evaluation([case], AsyncMock(return_value=observed), semantic_grader=AsyncMock(return_value=True))
+
+
+@pytest.mark.parametrize("payload", [
+    {}, {"equivalent": True}, {"reason": "Missing decision"},
+    {"equivalent": "true", "reason": "Wrong type"}, {"equivalent": 1, "reason": "Wrong type"},
+    {"equivalent": True, "reason": "  "}, {"equivalent": True, "reason": 5},
+    {"equivalent": True, "reason": "Valid reason", "extra": "forbidden"},
+])
+def test_semantic_grade_requires_a_boolean_and_nonblank_reason(payload) -> None:
+    with pytest.raises(ValidationError):
+        SemanticGrade.model_validate(payload)
 
 
 @pytest.mark.asyncio

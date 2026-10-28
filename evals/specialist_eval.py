@@ -38,6 +38,7 @@ SPECIALIST_TOOLS = {
     "scheduling": {"find_appointment_slots", "select_appointment_slot", "book_selected_appointment"},
     "human_handoff": {"request_handoff"},
 }
+SEMANTIC_ARGUMENT_FIELDS = {"search_policy": "query", "request_handoff": "explanation"}
 
 
 class SpecialistEvalCase(BaseModel):
@@ -74,6 +75,18 @@ class SpecialistFirstAction: #what the specialist actually does when tested
 
     def __post_init__(self) -> None:
         _validate_action(self.action, self.tool_name, self.arguments)
+
+
+class SemanticGrade(BaseModel):
+    """The judge's decision for one differing natural-language argument."""
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True, strict=True)
+
+    equivalent: bool
+    reason: str = Field(min_length=1)
+
+
+SemanticGrader = Callable[[SpecialistEvalCase, str, str, str], Awaitable[SemanticGrade]]
 
 
 def _nonblank_string(value: object, field: str) -> str:
@@ -144,21 +157,57 @@ def _summarize(results: list[dict[str, Any]]) -> dict[str, Any]:
     return {"total": len(results), "passed": passed, "failed": len(results) - passed, "metrics": metrics}
 
 
+async def _grade_arguments(
+    case: SpecialistEvalCase,
+    observed: SpecialistFirstAction,
+    semantic_grader: SemanticGrader | None,
+) -> tuple[bool, list[str]]:
+    expected, actual = case.expected_arguments, observed.arguments
+    if _json_arguments(actual) == _json_arguments(expected):
+        return True, []
+    field = SEMANTIC_ARGUMENT_FIELDS.get(case.expected_tool)
+    if (
+        semantic_grader is None or field is None or observed.tool_name != case.expected_tool
+        or expected is None or actual is None or actual.keys() != expected.keys()
+    ):
+        return False, []
+
+    # Exact structure and business fields must pass before spending a judge request.
+    exact_expected = {key: value for key, value in expected.items() if key != field}
+    exact_actual = {key: value for key, value in actual.items() if key != field}
+    if _json_arguments(exact_actual) != _json_arguments(exact_expected):
+        return False, []
+    expected_text, actual_text = expected.get(field), actual.get(field)
+    if not isinstance(expected_text, str) or not isinstance(actual_text, str) or not actual_text.strip():
+        return False, []
+
+    grade = await semantic_grader(case, field, expected_text, actual_text)
+    if not isinstance(grade, SemanticGrade):
+        raise TypeError("semantic_grader must return SemanticGrade")
+    failures = [] if grade.equivalent else [f"{case.expected_tool}.{field}: {grade.reason}"]
+    return grade.equivalent, failures
+
+
 async def run_specialist_evaluation(
     cases: Iterable[SpecialistEvalCase],
     run_case: Callable[[SpecialistEvalCase], Awaitable[SpecialistFirstAction]],
+    *,
+    semantic_grader: SemanticGrader | None = None,
 ) -> dict[str, Any]:
-    """Observe one action per case; score labels without calling agents or tools."""
+    """Score first actions; optionally judge two prose fields without executing tools."""
     results = []
     for case in cases:
         observed = await run_case(case)
         if not isinstance(observed, SpecialistFirstAction):
             raise TypeError("run_case must return SpecialistFirstAction")
         expects_tool = case.expected_action == "tool"
+        arguments_match, semantic_failures = (
+            await _grade_arguments(case, observed, semantic_grader) if expects_tool else (None, [])
+        )
         checks = {
             "action": observed.action == case.expected_action,
             "tool_name": observed.tool_name == case.expected_tool if expects_tool else None,
-            "arguments": _json_arguments(observed.arguments) == _json_arguments(case.expected_arguments) if expects_tool else None,
+            "arguments": arguments_match,
         }
         checks["complete_case"] = all(check for check in checks.values() if check is not None)
         failures = []
@@ -168,6 +217,7 @@ async def run_specialist_evaluation(
             failures.append(f"tool_name: expected {case.expected_tool}, received {observed.tool_name}")
         if checks["arguments"] is False:
             failures.append(f"arguments: expected {_json_arguments(case.expected_arguments)}, received {_json_arguments(observed.arguments)}")
+            failures.extend(semantic_failures)
         results.append({
             "case_id": case.case_id,
             "specialist": case.specialist,

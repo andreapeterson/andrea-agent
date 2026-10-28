@@ -93,9 +93,8 @@ Scores are separate, overall and per specialist:
 
 - **Action accuracy:** tool versus speech, across all cases.
 - **Tool-name accuracy:** exact tool name, across expected-tool cases only.
-- **Argument accuracy:** exact JSON arguments, across expected-tool cases only.
-  Object key order is ignored; types, missing keys, nulls, and exact strings
-  (including explanation/query strings) matter. Arguments are graded independently
+- **Argument accuracy:** exact JSON arguments with the two optional semantic checks
+  described below, across expected-tool cases only. Arguments are graded independently
   of tool-name correctness, so one mistake need not fail both checks.
 - **Complete-case accuracy:** every applicable check must pass. Speech cases
   require no tool or arguments; spoken wording is never compared.
@@ -105,7 +104,33 @@ Terminal scores display `N/A (0 applicable cases)` when the selected cases did
 not require that check. Errors in the injected callable propagate.
 7D2 tests the evaluation machinery using fakes; those scores do not measure
 the real model or prove execution safety. Expected labels and human reasons
-stay out of model input.
+stay out of the specialist's model input.
+
+### Exact and semantic argument grading
+
+Tool names, argument keys and structure, JSON types, phone numbers, IDs, booleans,
+enum values (including `request_handoff.reason`), all intake fields, and scheduling
+and booking arguments remain exact. Object key order is ignored. No business
+values are normalized or approved by the semantic judge.
+
+Only `search_policy.query` and `request_handoff.explanation` can receive semantic
+grading. Pass an async `semantic_grader(case, field, expected_text, actual_text)`
+returning `SemanticGrade(equivalent, reason)` to `run_specialist_evaluation`.
+Without an injected grader, the offline scorer retains exact JSON comparison.
+It never constructs an OpenAI client; offline tests inject fake graders.
+
+The grader is called only when an approved nonblank string differs exactly,
+the requested tool matches, and all keys, structure, and other fields already
+match exactly. Exact prose matches need no judge. An argument score passes only
+if every exact check passes and the prose preserves the same operational meaning
+without adding facts unsupported by the caller message or recorded context.
+For example, paraphrasing clinic hours can pass; switching to prices cannot.
+A changed handoff reason fails without asking the judge to approve the explanation.
+Semantic failures include the field name and the judge's short reason.
+Judge errors propagate and abort evaluation rather than counting as model failures.
+
+Semantic grading is evaluation-only. It changes no production agents, prompts,
+tools, handlers, or expected dataset wording.
 
 ## Live specialist first actions (7D3B)
 
@@ -142,9 +167,19 @@ call, decodes its arguments, and returns `SpecialistFirstAction` to the existing
 scorer. The JSONL supplies the expected action, tool, and arguments; the existing
 report compares them with the model's first action.
 
+The live evaluator injects an OpenAI-backed semantic judge. Each differing approved
+prose field that passes the exact checks adds one paid judge request, with extra
+latency and API cost (currently at most one judge request per selected case).
+`OPENAI_EVAL_JUDGE_MODEL` selects the judge model; otherwise it uses the configured
+live specialist model. The judge receives the expected and actual text, caller
+message, and allowlisted context as untrusted user data, separate from its grading
+instructions. It uses a small `SemanticGrade` schema through
+[Responses structured parsing](https://developers.openai.com/api/docs/guides/structured-outputs?api-mode=responses).
+It checks operational meaning and unsupported added facts, without executing tools.
+
 The evaluation deliberately stops before executing a tool. It creates no handlers
 or integration clients, calls no CRM, scheduler, policy retrieval, or handoff,
-sends no `function_call_output`, and makes no second model call. It evaluates
+sends no `function_call_output`, and makes no specialist continuation call. It evaluates
 tool selection and arguments, not the complete tool loop or final post-tool reply.
 It does not establish real model grounding or production execution safety.
 
