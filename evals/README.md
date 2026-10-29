@@ -212,3 +212,59 @@ The command exits with status 1 for a failed case or an incomplete live run; it
 prints no API key, full prompt, or raw response, and closes the client afterward.
 Live scores can vary when the model or prompt changes. Normal pytest uses fake
 OpenAI clients only and never opts into paid evaluation.
+
+## Final specialist responses (7D5, offline harness)
+
+`specialist_eval.py` grades the first model action: speech or a tool request and
+its arguments. The separate `response_eval.py` grades final caller-facing language
+after a controlled tool result. It does not grade tool selection or execute a tool.
+
+`response_cases.jsonl` starts with five fictional cases, one per specialist:
+customer not found, grounded clinic hours, incomplete intake, available slots
+without a booking, and a queued handoff without a live connection. Each
+`ResponseEvalCase` contains `case_id`, `specialist`, `user_message`, `context`
+using `PromptContext`, nullable `tool_name` and `tool_result`, human-written
+`criteria` with stable IDs and descriptions, and `tags`. Both tool fields must
+be supplied together or both be null. Tool results are controlled JSON fixtures;
+they are never fetched from CRM, scheduling, policy retrieval, or handoff services.
+The JSONL loader skips blank lines and rejects invalid rows or duplicate normalized
+case IDs with filename and line number.
+
+Supply two async callables explicitly:
+
+- `generate_response(case) -> str`: produces nonblank final caller-facing text.
+- `grade_response(case, response) -> ResponseJudgeResult`: returns `passed`, a
+  nonblank `reason`, and `criteria_results`, each with a `criterion_id` and boolean
+  `passed`. Every case criterion must appear exactly once; order does not matter.
+
+For example, inside your own async evaluation code:
+
+```python
+from evals.response_eval import (
+    format_response_report,
+    load_response_cases,
+    run_response_evaluation,
+)
+
+report = await run_response_evaluation(
+    load_response_cases(), generate_response, grade_response
+)
+print(format_response_report(report))
+```
+
+A complete case passes only when the judge's overall decision and every human
+criterion pass. A failed criterion cannot be overridden by `passed=True`.
+Blank responses, incomplete or duplicate criterion judgments, and generator or
+judge errors abort evaluation instead of counting as model failures.
+
+Reports contain total, passed, failed, and `pass_rate`, summaries by specialist,
+per-case responses and criterion results, and failures. The terminal formatter
+shows failed case IDs, judge reasons, and failed criterion IDs and descriptions.
+Empty groups retain numeric pass rate 0 in the dictionary and display `N/A`.
+Reports are returned in memory and are not saved automatically.
+
+This offline harness constructs no OpenAI clients, production agents, or handlers.
+Tests inject fake response generators and predetermined fake judgments; they
+verify loading, scoring, and reporting, **not a real model's final-response quality
+or grounding**. A live adapter will be added next. No live OpenAI runner is
+included in this part, and normal pytest makes no paid evaluation requests.
