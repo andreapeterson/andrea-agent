@@ -352,3 +352,37 @@ The command prints the existing response report and exits with status 1 for any
 failed case or aborted evaluation. Error output excludes credentials, full prompts,
 raw OpenAI responses, and upstream exception details. All unit tests use fake OpenAI
 clients and do not opt into live calls.
+
+## Conversation workflows (7D6A, offline harness)
+
+The component evaluations test one layer: `router_eval` checks specialist selection,
+`specialist_eval` checks first actions and arguments, and `response_eval` checks
+final caller-facing wording. `conversation_eval` checks the expected multi-turn
+structure instead, without duplicating response-language grading.
+
+`conversation_cases.jsonl` contains three fictional golden workflows: an unverified
+clinic-hours question, verification followed by urgent intake and handoff, and
+verification followed by routine intake, slot search, selection, and explicit booking
+confirmation. They use demo identifiers. The policy case retains the runtime's
+initial `verifying_customer` phase without requiring or performing verification.
+
+Inject an async `run_conversation(case) -> ConversationRunObservation` into
+`run_conversation_evaluation(load_conversation_cases(), run_conversation)`, then
+print `format_conversation_report(report)`. Observations contain specialist and
+ordered tool lists for each caller turn, plus the final phase and verification,
+booking, and handoff outcomes. Both models validate specialist/tool ownership,
+turn counts, and consistent completion outcomes. Loader errors include filename
+and line number; duplicate normalized case IDs are rejected.
+
+The scorer compares specialist sequence, tool sequence (including call order within
+each turn), final phase, verification, booking, and handoff separately. A complete
+case passes only if all six checks pass. Every check applies to every case:
+expected `false` outcomes also enforce the absence of unintended actions. Reports
+include counts, pass rate, per-check accuracy, per-case results, and exact
+expected-versus-actual failure details. Empty metrics display `N/A`; their numeric
+accuracy remains zero. Invalid observations and runner errors propagate.
+
+7D6A uses injected fake observations. It does **not** test a real model, execute
+production tools, construct the runtime or a conversation store, or make external
+requests. A controlled live adapter will be added in 7D6B. Response wording remains
+covered by `response_eval`.
