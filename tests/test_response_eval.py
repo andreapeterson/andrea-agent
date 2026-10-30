@@ -26,6 +26,7 @@ from evals.response_eval import (
     load_response_cases,
     run_response_evaluation,
 )
+from evals.specialist_eval import TOOL_ARGUMENT_MODELS
 
 FAKE_RESPONSES = {
     "verification": "I couldn't find an account with that phone number. Could you check the number?",
@@ -78,6 +79,7 @@ def test_five_cases_cover_each_specialist_with_controlled_results_and_human_crit
         assert isinstance(case.context, PromptContext)
         assert case.context.active_agent == case.specialist
         assert case.tool_name in SPECIALIST_TOOLS[case.specialist]
+        assert TOOL_ARGUMENT_MODELS[case.tool_name].model_validate(case.tool_arguments).model_dump(mode="json") == case.tool_arguments
         assert len(case.criteria) == len({criterion.criterion_id for criterion in case.criteria}) == 3
         assert all(criterion.description for criterion in case.criteria)
         assert case.tags
@@ -152,15 +154,55 @@ def test_case_requires_fields_forbids_extras_and_duplicate_criteria(valid_row, c
         ResponseEvalCase.model_validate(valid_row)
 
 
-def test_null_tool_pair_is_supported_and_case_is_frozen(valid_row) -> None:
-    valid_row.update(tool_name=None, tool_result=None)
+def test_null_tool_triple_is_supported_and_case_is_frozen(valid_row) -> None:
+    valid_row.update(tool_name=None, tool_arguments=None, tool_result=None)
     case = ResponseEvalCase.model_validate(valid_row)
-    assert case.tool_name is case.tool_result is None
+    assert case.tool_name is case.tool_arguments is case.tool_result is None
     with pytest.raises(ValidationError, match="frozen"):
         case.case_id = "replacement"
     valid_row["tool_result"] = {"found": False}
-    with pytest.raises(ValidationError, match="both be null or both be supplied"):
+    with pytest.raises(ValidationError, match="all be null or all be supplied"):
         ResponseEvalCase.model_validate(valid_row)
+
+
+@pytest.mark.parametrize("present", [
+    (True, True, False), (True, False, True), (False, True, True),
+    (True, False, False), (False, True, False), (False, False, True),
+])
+def test_tool_fields_require_all_three_values_or_all_null(valid_row, present) -> None:
+    for field, supplied in zip(("tool_name", "tool_arguments", "tool_result"), present, strict=True):
+        if not supplied:
+            valid_row[field] = None
+    with pytest.raises(ValidationError, match="all be null or all be supplied"):
+        ResponseEvalCase.model_validate(valid_row)
+
+
+@pytest.mark.parametrize("specialist, tool, arguments", [
+    ("verification", "lookup_customer", {}),
+    ("verification", "lookup_customer", {"phone": "202-555-0142", "customer_id": "not-allowed"}),
+    ("policy", "search_policy", {"phone": "202-555-0142"}),
+    ("policy", "search_policy", {"query": " "}),
+    ("intake", "record_intake", {"original_concern": "A cough", "difficulty_breathing": False}),
+    ("scheduling", "find_appointment_slots", {"pet_reference": True}),
+    ("scheduling", "select_appointment_slot", {"slot_id": " "}),
+    ("scheduling", "book_selected_appointment", {"confirmed_by_caller": "true"}),
+    ("human_handoff", "request_handoff", {"reason": "invented", "explanation": "Unsupported reason"}),
+])
+def test_tool_arguments_use_the_named_production_argument_model(valid_row, specialist, tool, arguments) -> None:
+    valid_row.update(specialist=specialist, tool_name=tool, tool_arguments=arguments)
+    with pytest.raises(ValidationError):
+        ResponseEvalCase.model_validate(valid_row)
+
+
+def test_tool_arguments_are_required_and_validated_errors_keep_loader_location(tmp_path, valid_row) -> None:
+    missing = {key: value for key, value in valid_row.items() if key != "tool_arguments"}
+    with pytest.raises(ValidationError, match="tool_arguments"):
+        ResponseEvalCase.model_validate(missing)
+    valid_row["tool_arguments"] = {"phone": "202-555-0142", "extra": True}
+    path = write_rows(tmp_path / "bad-arguments.jsonl", valid_row)
+    with pytest.raises(ValueError) as caught:
+        load_response_cases(path)
+    assert str(caught.value).startswith(f"{path}:1:")
 
 
 @pytest.mark.asyncio

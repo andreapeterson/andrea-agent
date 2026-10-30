@@ -223,9 +223,11 @@ after a controlled tool result. It does not grade tool selection or execute a to
 customer not found, grounded clinic hours, incomplete intake, available slots
 without a booking, and a queued handoff without a live connection. Each
 `ResponseEvalCase` contains `case_id`, `specialist`, `user_message`, `context`
-using `PromptContext`, nullable `tool_name` and `tool_result`, human-written
-`criteria` with stable IDs and descriptions, and `tags`. Both tool fields must
-be supplied together or both be null. Tool results are controlled JSON fixtures;
+using `PromptContext`, nullable `tool_name`, `tool_arguments`, and `tool_result`,
+human-written `criteria` with stable IDs and descriptions, and `tags`. All three
+tool fields must be supplied together or all be null. Arguments are validated
+with the named tool's existing Pydantic argument model and are not rewritten.
+Tool results are controlled JSON fixtures;
 they are never fetched from CRM, scheduling, policy retrieval, or handoff services.
 The JSONL loader skips blank lines and rejects invalid rows or duplicate normalized
 case IDs with filename and line number.
@@ -266,5 +268,87 @@ Reports are returned in memory and are not saved automatically.
 This offline harness constructs no OpenAI clients, production agents, or handlers.
 Tests inject fake response generators and predetermined fake judgments; they
 verify loading, scoring, and reporting, **not a real model's final-response quality
-or grounding**. A live adapter will be added next. No live OpenAI runner is
-included in this part, and normal pytest makes no paid evaluation requests.
+or grounding**. The opt-in live adapter below supplies real model callables;
+normal pytest makes no paid evaluation requests.
+
+## Live final-response evaluation (7D5B)
+
+`live_specialist_eval` evaluates the real model's first action, tool selection,
+and arguments. `response_eval` scores final caller-facing speech.
+`live_response_eval` assumes the expected tool call already occurred and connects
+that harness to real specialist and judge models using controlled post-tool input.
+
+Set `OPENAI_API_KEY` in the environment. Every live command requires
+`--confirm-live` and exactly one selection mode: repeatable `--case-id` or
+`--all-cases`. Unknown IDs are rejected before client creation. Repeated IDs run
+once, in dataset order, sequentially. The entire dataset is never selected by default.
+
+Single smoke case:
+
+```bash
+uv run python -m evals.live_response_eval --confirm-live --case-id verification_customer_not_found
+```
+
+Several cases:
+
+```bash
+uv run python -m evals.live_response_eval --confirm-live --case-id policy_grounded_clinic_hours --case-id handoff_queued_not_connected
+```
+
+All five response cases:
+
+```bash
+uv run python -m evals.live_response_eval --confirm-live --all-cases
+```
+
+`--model` overrides `OPENAI_SPECIALIST_MODEL`, falling back to PawLine's current
+specialist default, `gpt-6-luna`. `OPENAI_EVAL_JUDGE_MODEL` selects the judge;
+otherwise it uses the selected specialist model. One OpenAI client is shared
+and closed after the run.
+
+Generation renders the real specialist prompt and sends its real tool definitions
+with one specialist continuation request. Input contains the caller message, a
+synthetic preserved `function_call` containing the fixture's `tool_name` and
+serialized `tool_arguments`, and its matching `function_call_output` containing
+the serialized `tool_result`. Both items share a deterministic case-scoped `call_id`.
+No tool selection is requested again, and neither `run_agent_turn` nor any handler
+executes. The response must be nonblank final speech; any new tool request fails
+safely without execution or another specialist request. A speech-only case sends
+just the caller message and follows the same final-speech requirement.
+First-action evaluation tests model argument choices; this adapter validates
+predefined arguments only to ensure the injected completed call is well-formed.
+
+No production handler or integration is constructed or called. There is no CRM,
+scheduler, retriever, or handoff access, and no `ConversationState` is created or
+modified. Real production prompts and agent behavior are unchanged.
+
+Specialist and judge contexts use explicit allowlists. Policy receives no identity
+or intake context; the other specialists receive only relevant caller/pet facts,
+intake or routing facts, and appointment context needed by that specific scheduling
+operation. Conversation history, credentials, IDs from private state, idempotency
+keys, receipts, and unrelated appointment/intake data are omitted. Fixture arguments
+and results with forbidden private fields are rejected before a live request,
+rather than silently changing their values. A pet ID is permitted only
+when a human criterion explicitly has ID `exact_pet_id`. The initial scheduling
+fixture omits its unused pet ID; its grading criteria are unchanged.
+
+The judge receives only final text, caller message, specialist, all original criterion
+IDs and descriptions, controlled tool name, arguments and result when present, and
+the projected context.
+It uses [Responses structured parsing](https://developers.openai.com/api/docs/guides/structured-outputs)
+into `ResponseJudgeResult`, grades every
+criterion once, allows equivalent wording, and treats all supplied text as data
+rather than instructions. The existing scorer enforces complete criterion coverage
+and requires every criterion to pass.
+
+Live runs require credentials, network access, time, and API cost. Each current
+tool-result case makes one specialist continuation call and one judge call. A future
+speech-only case makes one normal specialist request and one judge call. Errors can
+stop a run earlier. Future end-to-end evaluation will test the complete first model
+call → handler → second model call sequence; this controlled post-tool evaluation
+does not test real integrations or complete production conversations.
+
+The command prints the existing response report and exits with status 1 for any
+failed case or aborted evaluation. Error output excludes credentials, full prompts,
+raw OpenAI responses, and upstream exception details. All unit tests use fake OpenAI
+clients and do not opt into live calls.

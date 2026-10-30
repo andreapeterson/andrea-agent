@@ -10,6 +10,7 @@ from typing import Annotated, Any, Literal, Self
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.agents.prompt_context import PromptContext
+from evals.specialist_eval import TOOL_ARGUMENT_MODELS
 
 DEFAULT_CASES_PATH = Path(__file__).with_name("response_cases.jsonl")
 SPECIALIST_TOOLS = {
@@ -36,20 +37,24 @@ class ResponseEvalCase(BaseModel):
     user_message: str = Field(min_length=1)
     context: PromptContext
     tool_name: str | None = Field(min_length=1)
+    tool_arguments: dict[str, object] | None
     tool_result: dict[str, object] | None
     criteria: list[ResponseCriterion] = Field(min_length=1)
     tags: list[Annotated[str, Field(min_length=1)]] = Field(min_length=1)
 
     @model_validator(mode="after")
     def validate_case(self) -> Self:
-        if (self.tool_name is None) != (self.tool_result is None):
-            raise ValueError("tool_name and tool_result must both be null or both be supplied")
+        tool_fields = (self.tool_name, self.tool_arguments, self.tool_result)
+        if any(value is None for value in tool_fields) and not all(value is None for value in tool_fields):
+            raise ValueError("tool_name, tool_arguments, and tool_result must all be null or all be supplied")
         if self.tool_name is not None and self.tool_name not in SPECIALIST_TOOLS[self.specialist]:
             raise ValueError("tool_name must belong to the selected specialist")
+        if self.tool_name is not None:
+            TOOL_ARGUMENT_MODELS[self.tool_name].model_validate(self.tool_arguments)
         ids = [criterion.criterion_id for criterion in self.criteria]
         if len(ids) != len(set(ids)):
             raise ValueError("criterion IDs must be unique within a case")
-        json.dumps(self.tool_result, allow_nan=False)
+        json.dumps([self.tool_arguments, self.tool_result], allow_nan=False)
         return self
 
 
