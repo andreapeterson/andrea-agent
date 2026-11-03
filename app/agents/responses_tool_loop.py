@@ -8,6 +8,8 @@ from collections.abc import Callable
 
 from openai import AsyncOpenAI
 
+from app.agents.workflow_observation import observe_tool
+
 
 class AgentModelRequestError(RuntimeError):
     """Raised when an OpenAI Responses API request fails."""
@@ -101,6 +103,8 @@ async def run_agent_turn(
         handler = tool_handlers.get(tool_name)
         if handler is None:
             raise UnknownAgentToolError(f"The model requested an unapproved tool: {tool_name}.")
+
+        observe_tool(tool_name)
 
         # Preserve the model's function call for the next API request.
         input_items.extend(output_items)

@@ -344,7 +344,7 @@ and requires every criterion to pass.
 Live runs require credentials, network access, time, and API cost. Each current
 tool-result case makes one specialist continuation call and one judge call. A future
 speech-only case makes one normal specialist request and one judge call. Errors can
-stop a run earlier. Future end-to-end evaluation will test the complete first model
+stop a run earlier. The conversation evaluation below tests the complete first model
 call → handler → second model call sequence; this controlled post-tool evaluation
 does not test real integrations or complete production conversations.
 
@@ -384,5 +384,71 @@ accuracy remains zero. Invalid observations and runner errors propagate.
 
 7D6A uses injected fake observations. It does **not** test a real model, execute
 production tools, construct the runtime or a conversation store, or make external
-requests. A controlled live adapter will be added in 7D6B. Response wording remains
+requests. The controlled live adapter below adds real model calls in 7D6B. Response wording remains
 covered by `response_eval`.
+
+## Live conversation workflows (7D6B)
+
+`conversation_eval.py` is the model-independent scorer. `live_conversation_eval.py`
+runs the real `PromptAgentRuntime` directly, without FastAPI: Router → specialist →
+production tool handler → controlled integration → tool result → specialist
+continuation → state save. Unlike `live_response_eval`, it intentionally runs the
+complete Responses API tool loop and preserves state across caller turns.
+
+Set `OPENAI_API_KEY`, `OPENAI_ROUTER_MODEL`, and `OPENAI_SPECIALIST_MODEL` in your
+environment. Both model names must be explicitly configured; `--router-model`
+and `--specialist-model` override the corresponding environment variables. The
+command requires `--confirm-live` and exactly one selection mode, repeatable
+`--case-id` or `--all-cases`. Unknown IDs fail before client creation; repeated
+IDs run once in dataset order. It never selects all cases automatically.
+
+Single policy workflow:
+
+```bash
+uv run python -m evals.live_conversation_eval --confirm-live --case-id unverified_policy_hours
+```
+
+Several workflows:
+
+```bash
+uv run python -m evals.live_conversation_eval --confirm-live --case-id verified_urgent_intake_handoff --case-id verified_routine_booking
+```
+
+All three workflows:
+
+```bash
+uv run python -m evals.live_conversation_eval --confirm-live --all-cases
+```
+
+Each case gets a unique demo conversation ID, a fresh in-memory store, and fresh
+evaluation-only integrations. CRM recognizes only the two fictional dataset phone
+numbers and returns Avery Demo with the dog Maize. Policy search returns controlled
+demo clinic-hours evidence without embeddings. Scheduling supplies demo routine
+or same-day slots and deterministic booking confirmations; repeated identical
+booking requests with the same idempotency key reuse the confirmation. Handoff
+returns a fictional queued receipt. No production HTTP integration client is
+constructed, and no real CRM, policy, scheduler, or handoff service is contacted.
+The only network client is OpenAI, using the official API base URL.
+
+Only caller turns enter the runtime. Expected sequences, outcomes, case IDs, and
+tags stay out of model inputs. A small optional hook records only conversation ID,
+turn number, selected specialist, and tool name, in execution order. It is disabled
+by default and scoped to the current task and turn. It records no caller text,
+prompts, tool arguments/results, identity facts, credentials, or raw responses.
+Final phase, verification, booking, and handoff outcomes come from saved
+`ConversationState`, never from model prose.
+
+Wrong routes or approved tool choices are scored as observed; the adapter does not
+rewrite them to match expectations. Runtime/model/integration errors abort with a
+generic safe message. If early completion causes a later caller turn to skip the
+Router, the run aborts rather than inventing a specialist for that turn. Reports
+show only the existing structural scores and mismatches. The command exits with
+status 1 for a failed case or an aborted run and does not print prompts, tool data,
+raw model responses, credentials, or exception chains.
+
+Live runs may make many paid OpenAI calls: ordinarily one Router call per turn,
+one specialist call, and one continuation per tool execution. Tool loops can add
+calls up to their existing production limit. There is no LLM judge, wording grade,
+or latency/token/cost tracking. Final response wording remains evaluated separately
+by `response_eval.py`. Unit tests use fake OpenAI clients, run the real workflow
+with controlled integrations, and make no paid requests.

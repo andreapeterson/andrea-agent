@@ -10,6 +10,7 @@ from app.agents.prompt_renderer import PromptRenderer
 from app.agents.router_agent import OpenAIRouter, RouteDecision
 from app.agents.verification_agent import VerificationAgent
 from app.agents.scheduling_agent import SchedulingAgent
+from app.agents.workflow_observation import observe_specialist
 
 
 class SpecialistNotAvailableError(RuntimeError):
@@ -38,6 +39,7 @@ def route_and_respond(
             instructions=instructions,
             user_message=user_message,
         )
+        observe_specialist(decision.destination)
 
         if decision.destination == "verification":
             return await verification_agent.respond(

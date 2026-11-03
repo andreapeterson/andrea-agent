@@ -24,6 +24,7 @@ from app.agents.scheduling_tools import (
     create_select_appointment_slot_handler,
 )
 from app.agents.verification_agent import VerificationAgent
+from app.agents.workflow_observation import WorkflowObserver, observe_turn
 from app.integrations import HandoffClient, LegacyCRMClient, SchedulerClient
 from app.models.agent_result import AgentTurnResult
 from app.models.conversation import (
@@ -51,6 +52,7 @@ class PromptAgentRuntime:
         handoff_client: HandoffClient,
         policy_agent: PolicyAgent | None,
         idempotency_key_factory: Callable[[], str],
+        workflow_observer: WorkflowObserver | None = None,
     ) -> None:
         self._conversation_store = conversation_store
         self._openai_client = openai_client
@@ -62,6 +64,7 @@ class PromptAgentRuntime:
         self._handoff_client = handoff_client
         self._policy_agent = policy_agent
         self._idempotency_key_factory = idempotency_key_factory
+        self._workflow_observer = workflow_observer
         self._locks: dict[str, asyncio.Lock] = {}
 
     def _build_prompt_context(self, state: ConversationState) -> PromptContext: # everything Pawline knows to info approved for prompt
@@ -197,7 +200,8 @@ class PromptAgentRuntime:
                 policy_agent=self._policy_agent,
             )
             # On an error, do not overwrite important state already saved by a tool.
-            assistant_message = await handle(context=context, user_message=user_message) #actually call the router and specialist agents to get a response based on the user message and current context
+            with observe_turn(self._workflow_observer, conversation_id, state.turn_count + 1):
+                assistant_message = await handle(context=context, user_message=user_message)
             state.messages.extend([
                 ConversationMessage(role=ConversationRole.USER, content=user_message),
                 ConversationMessage(role=ConversationRole.ASSISTANT, content=assistant_message),
