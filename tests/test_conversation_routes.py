@@ -208,7 +208,7 @@ def test_http_reaches_cached_real_runtime_router_verification_tool_and_saved_sta
         create=AsyncMock(side_effect=create),
     )
     openai_factory = Mock(return_value=SimpleNamespace(responses=responses))
-    monkeypatch.setenv("OPENAI_API_KEY", "fake-api-key")
+    monkeypatch.setattr(dependencies, "get_openai_api_key", lambda: "fake-api-key")
     monkeypatch.setattr(dependencies, "AsyncOpenAI", openai_factory)
     monkeypatch.setattr(dependencies, "get_legacy_crm_client", Mock(return_value=crm))
     monkeypatch.setattr(dependencies, "get_scheduler_client", Mock(return_value=scheduler))

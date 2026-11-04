@@ -9,6 +9,7 @@ from openai import AsyncOpenAI
 from app.agents.policy_agent import PolicyAgent
 from app.agents.prompt_renderer import PromptRenderer
 from app.agents.search_policy_tool import create_search_policy_handler
+from app.infisical import get_openai_api_key
 from app.integrations import (
     HandoffClient,
     LegacyCRMClient,
@@ -39,11 +40,8 @@ async def get_prompt_agent_runtime(request: Request) -> PromptAgentRuntime | Non
         if runtime is not None:
             return runtime
 
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key or not api_key.strip():
-            return None
-
         try:
+            api_key = await asyncio.to_thread(get_openai_api_key)
             crm_client = get_legacy_crm_client()
             scheduler_client = get_scheduler_client()
             handoff_client = get_handoff_client()
@@ -123,11 +121,6 @@ async def get_policy_answer_service(request: Request) -> PolicyAnswerService | N
         if service is not None:
             return service
 
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key or not api_key.strip():
-            app_state.policy_answer_service = None
-            return None
-
         try:
             top_k = int(os.getenv("POLICY_TOP_K", "3"))
             minimum_similarity = float(os.getenv("POLICY_MIN_SIMILARITY", "0.45"))
@@ -136,6 +129,7 @@ async def get_policy_answer_service(request: Request) -> PolicyAnswerService | N
             return None
 
         try:
+            api_key = await asyncio.to_thread(get_openai_api_key)
             client = AsyncOpenAI(api_key=api_key)
             policy_model = os.getenv("OPENAI_POLICY_MODEL", "gpt-6-luna")
             retriever = await get_policy_retriever(request)
@@ -173,11 +167,8 @@ async def get_policy_retriever(request: Request) -> PolicyRetriever | None:
         if retriever is not None:
             return retriever
 
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key or not api_key.strip():
-            return None
-
         try:
+            api_key = await asyncio.to_thread(get_openai_api_key)
             client = AsyncOpenAI(api_key=api_key)
             embedding_model = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
             policy_directory = Path(__file__).resolve().parent.parent / "knowledge" / "clinic_policies"
@@ -209,11 +200,8 @@ async def get_policy_agent(request: Request) -> PolicyAgent | None:
         if agent is not None:
             return agent
 
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key or not api_key.strip():
-            return None
-
         try:
+            api_key = await asyncio.to_thread(get_openai_api_key)
             top_k = int(os.getenv("POLICY_TOP_K", "3"))
             minimum_similarity = float(os.getenv("POLICY_MIN_SIMILARITY", "0.45"))
             retriever = await get_policy_retriever(request)

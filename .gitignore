@@ -4,4 +4,12 @@ __pycache__/
 .venv/
 pawline.egg-info/
 .env
+.env.*
+!.env.example
+.infisical/
+credentials.json
+credentials.local.*
+secrets.json
+secrets.yaml
+secrets.yml
 .DS_Store

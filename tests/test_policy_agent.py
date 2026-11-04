@@ -312,7 +312,7 @@ async def test_policy_dependencies_share_one_index_and_prepare_handler_once(monk
     load_chunks = Mock(return_value=[search_result().chunk])
     generator = Mock()
     build_handler = Mock(wraps=dependencies.create_search_policy_handler)
-    monkeypatch.setenv("OPENAI_API_KEY", "fake-key-for-test")
+    monkeypatch.setattr(dependencies, "get_openai_api_key", lambda: "fake-key-for-test")
     monkeypatch.setenv("POLICY_TOP_K", "4")
     monkeypatch.setenv("POLICY_MIN_SIMILARITY", "0.6")
     monkeypatch.setenv("OPENAI_POLICY_MODEL", "policy-test-model")
@@ -349,7 +349,7 @@ async def test_policy_dependencies_share_one_index_and_prepare_handler_once(monk
 async def test_policy_dependencies_reuse_a_preinitialized_retriever(monkeypatch) -> None:
     retriever = FakeRetriever([search_result()])
     request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(policy_retriever=retriever)))
-    monkeypatch.setenv("OPENAI_API_KEY", "fake-key-for-test")
+    monkeypatch.setattr(dependencies, "get_openai_api_key", lambda: "fake-key-for-test")
     monkeypatch.setattr(dependencies, "AsyncOpenAI", lambda **kwargs: fake_client(FakeResponses([])))
     load_chunks = Mock(side_effect=AssertionError("Do not reload initialized policy index"))
     monkeypatch.setattr(dependencies, "load_policy_chunks", load_chunks)

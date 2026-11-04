@@ -19,7 +19,8 @@ from app.services.prompt_agent_runtime import PromptAgentRuntime
 
 @pytest.fixture
 def configured_dependencies(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "fake-api-key")
+    key_loader = Mock(return_value="fake-api-key")
+    monkeypatch.setattr(dependencies, "get_openai_api_key", key_loader)
     monkeypatch.delenv("OPENAI_ROUTER_MODEL", raising=False)
     monkeypatch.delenv("OPENAI_SPECIALIST_MODEL", raising=False)
     client = Mock(spec=AsyncOpenAI)
@@ -39,7 +40,7 @@ def configured_dependencies(monkeypatch):
     request = Request({"type": "http", "app": FastAPI()})
     return SimpleNamespace(
         request=request, client=client, crm=crm, scheduler=scheduler,
-        handoff=handoff, policy=policy, factories=factories,
+        handoff=handoff, policy=policy, factories=factories, key_loader=key_loader,
     )
 
 
@@ -104,13 +105,9 @@ async def test_concurrent_initialization_builds_only_one_runtime(configured_depe
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("api_key", [None, "", "  "])
-async def test_missing_openai_configuration_returns_none_without_initializing_clients(configured_dependencies, monkeypatch, api_key) -> None:
+async def test_missing_infisical_configuration_returns_none_without_initializing_clients(configured_dependencies) -> None:
     setup = configured_dependencies
-    if api_key is None:
-        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    else:
-        monkeypatch.setenv("OPENAI_API_KEY", api_key)
+    setup.key_loader.side_effect = RuntimeError("Missing Infisical configuration")
 
     assert await dependencies.get_prompt_agent_runtime(setup.request) is None
     for factory in setup.factories.values():
