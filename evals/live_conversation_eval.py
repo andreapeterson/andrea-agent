@@ -16,7 +16,7 @@ from openai import AsyncOpenAI
 from app.agents.policy_agent import PolicyAgent
 from app.agents.prompt_renderer import PromptRenderer
 from app.agents.search_policy_tool import create_search_policy_handler
-from app.agents.workflow_observation import WorkflowEvent
+from app.agents.workflow_observation import WorkflowEvent, WorkflowEventType
 from app.models.appointment import AppointmentSlot, AppointmentType, BookingConfirmation, BookingRequest
 from app.models.customer import Customer, Pet
 from app.models.handoff import HandoffReceipt, HandoffRequest
@@ -156,12 +156,12 @@ def create_live_run_conversation(
             for turn_number, caller_message in enumerate(case.caller_turns, start=1):
                 await runtime.handle_turn(conversation_id, caller_message)
                 turn_events = [event for event in events if event.turn_number == turn_number]
-                routes = [event.specialist for event in turn_events if event.tool_name is None]
+                routes = [event.specialist for event in turn_events if event.event_type == WorkflowEventType.SPECIALIST_SELECTED]
                 if len(routes) != 1:
                     # An early terminal state can skip routing for subsequent caller turns.
                     raise LiveConversationEvaluationError("A caller turn did not produce exactly one Router decision")
                 specialists.append(routes[0])
-                tools.append([event.tool_name for event in turn_events if event.tool_name is not None])
+                tools.append([event.tool_name for event in turn_events if event.event_type == WorkflowEventType.TOOL_REQUESTED])
             state = store.get(conversation_id)
             return ConversationRunObservation(
                 specialists_by_turn=specialists, tools_by_turn=tools,

@@ -8,6 +8,9 @@ from typing import Literal
 from openai import AsyncOpenAI
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.agents.prompt_renderer import ROUTER_PROMPT_VERSION
+from app.agents.workflow_observation import observe_model_request
+
 
 class RouterRequestError(RuntimeError):
     """Raised when the router's OpenAI request cannot be completed."""
@@ -58,16 +61,17 @@ class OpenAIRouter:
             raise RouterRequestError("User message cannot be blank.")
 
         try:
-            parse_result = self._client.responses.parse( #response.parse is used when we require 1 specific result/ text_format
-                model=self._model,
-                input=user_message,
-                instructions=instructions,
-                text_format=RouteDecision, #structure the response like the Pydantic RouteDecision model.
-            )
-            if inspect.isawaitable(parse_result):
-                response = await parse_result
-            else: #normally the OpenAI call is asynchronous and must be awaited. this supports simple synchronous fake clients used in tests.
-                response = parse_result
+            with observe_model_request(self._model, prompt_version=ROUTER_PROMPT_VERSION):
+                parse_result = self._client.responses.parse( #response.parse is used when we require 1 specific result/ text_format
+                    model=self._model,
+                    input=user_message,
+                    instructions=instructions,
+                    text_format=RouteDecision, #structure the response like the Pydantic RouteDecision model.
+                )
+                if inspect.isawaitable(parse_result):
+                    response = await parse_result
+                else: #normally the OpenAI call is asynchronous and must be awaited. this supports simple synchronous fake clients used in tests.
+                    response = parse_result
         except Exception as exc:
             raise RouterRequestError("Router request failed.") from exc #request problem
 

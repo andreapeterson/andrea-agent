@@ -6,11 +6,26 @@ from app.agents.intake_agent import IntakeAgent
 from app.agents.human_handoff_agent import HumanHandoffAgent
 from app.agents.prompt_context import PromptContext
 from app.agents.policy_agent import PolicyAgent
-from app.agents.prompt_renderer import PromptRenderer
+from app.agents.prompt_renderer import (
+    HUMAN_HANDOFF_PROMPT_VERSION,
+    INTAKE_PROMPT_VERSION,
+    POLICY_PROMPT_VERSION,
+    SCHEDULING_PROMPT_VERSION,
+    VERIFICATION_PROMPT_VERSION,
+    PromptRenderer,
+)
 from app.agents.router_agent import OpenAIRouter, RouteDecision
 from app.agents.verification_agent import VerificationAgent
 from app.agents.scheduling_agent import SchedulingAgent
 from app.agents.workflow_observation import observe_specialist
+
+SPECIALIST_PROMPT_VERSIONS = {
+    "verification": VERIFICATION_PROMPT_VERSION,
+    "policy": POLICY_PROMPT_VERSION,
+    "intake": INTAKE_PROMPT_VERSION,
+    "scheduling": SCHEDULING_PROMPT_VERSION,
+    "human_handoff": HUMAN_HANDOFF_PROMPT_VERSION,
+}
 
 
 class SpecialistNotAvailableError(RuntimeError):
@@ -39,7 +54,9 @@ def route_and_respond(
             instructions=instructions,
             user_message=user_message,
         )
-        observe_specialist(decision.destination)
+        observe_specialist(
+            decision.destination, prompt_version=SPECIALIST_PROMPT_VERSIONS.get(decision.destination),
+        )
 
         if decision.destination == "verification":
             return await verification_agent.respond(

@@ -8,7 +8,7 @@ from collections.abc import Callable
 
 from openai import AsyncOpenAI
 
-from app.agents.workflow_observation import observe_tool
+from app.agents.workflow_observation import observe_model_request, observe_tool
 
 
 class AgentModelRequestError(RuntimeError):
@@ -55,13 +55,14 @@ async def run_agent_turn(
     while True:
         # First model request: the model either answers or asks for a tool.
         try:
-            response = await client.responses.create(
-                model=model,
-                instructions=instructions,
-                input=input_items,
-                tools=tools,
-                parallel_tool_calls=False, #model can only request 1 tool at a time
-            )
+            with observe_model_request(model):
+                response = await client.responses.create(
+                    model=model,
+                    instructions=instructions,
+                    input=input_items,
+                    tools=tools,
+                    parallel_tool_calls=False, #model can only request 1 tool at a time
+                )
         except Exception as exc:
             raise AgentModelRequestError("The OpenAI Responses API request failed.") from exc
 
@@ -104,17 +105,16 @@ async def run_agent_turn(
         if handler is None:
             raise UnknownAgentToolError(f"The model requested an unapproved tool: {tool_name}.")
 
-        observe_tool(tool_name)
-
         # Preserve the model's function call for the next API request.
         input_items.extend(output_items)
 
         # Python executes the approved tool; the LLM does not run it itself.
         try:
-            tool_result = handler(arguments)
-            if inspect.isawaitable(tool_result):
-                tool_result = await tool_result
-            serialized_result = json.dumps(tool_result, ensure_ascii=False, allow_nan=False)
+            with observe_tool(tool_name, model=model):
+                tool_result = handler(arguments)
+                if inspect.isawaitable(tool_result):
+                    tool_result = await tool_result
+                serialized_result = json.dumps(tool_result, ensure_ascii=False, allow_nan=False)
         except Exception as exc:
             raise ToolExecutionError("The approved tool failed or returned a non-JSON result.") from exc
 

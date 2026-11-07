@@ -123,92 +123,92 @@ class PromptAgentRuntime:
         lock = self._locks.setdefault(conversation_id, asyncio.Lock())
         async with lock:
             state = self._conversation_store.get(conversation_id)
-            if state.phase in {
-                ConversationPhase.BOOKING_COMPLETE,
-                ConversationPhase.HANDOFF_COMPLETE,
-                ConversationPhase.COMPLETED,
-            }:
-                message = next(
-                    (message.content for message in reversed(state.messages) if message.role == ConversationRole.ASSISTANT),
-                    "This conversation is already complete.", #return last assistant message if available, otherwise default message
-                )
-                return AgentTurnResult(state=state, assistant_message=message)
-
-            context = self._build_prompt_context(state)
-            # All handlers share this state; service-backed tools also receive their service client.
-            lookup_handler = create_lookup_customer_handler(
-                self._legacy_crm_client,
-                conversation_state=state,
-                conversation_store=self._conversation_store,
-            )
-            intake_handler = create_record_intake_handler(
-                conversation_state=state,
-                conversation_store=self._conversation_store,
-            )
-            handoff_handler = create_request_handoff_handler(
-                self._handoff_client,
-                conversation_state=state,
-                conversation_store=self._conversation_store,
-            )
-            find_slots_handler = create_find_appointment_slots_handler(
-                self._scheduler_client,
-                conversation_state=state,
-                conversation_store=self._conversation_store,
-            )
-            select_slot_handler = create_select_appointment_slot_handler(
-                conversation_state=state,
-                conversation_store=self._conversation_store,
-            )
-            booking_handler = create_book_selected_appointment_handler(
-                self._scheduler_client,
-                conversation_state=state,
-                conversation_store=self._conversation_store,
-                idempotency_key_factory=self._idempotency_key_factory,
-            )
-
-            # Agents configure model calls. Tool definitions go to the model; handlers run in Python.
-            handle = route_and_respond( #configured function that knows which router and specialists to call based on the current conversation state and user message
-                router=self._router,
-                renderer=self._prompt_renderer,
-                verification_agent=VerificationAgent(
-                    client=self._openai_client,
-                    model=self._specialist_model,
-                    prompt_renderer=self._prompt_renderer,
-                    lookup_customer_handler=lookup_handler,
-                ),
-                intake_agent=IntakeAgent(
-                    client=self._openai_client,
-                    model=self._specialist_model,
-                    prompt_renderer=self._prompt_renderer,
-                    record_intake_handler=intake_handler,
-                    request_handoff_handler=handoff_handler,
-                ),
-                human_handoff_agent=HumanHandoffAgent(
-                    client=self._openai_client,
-                    model=self._specialist_model,
-                    prompt_renderer=self._prompt_renderer,
-                    request_handoff_handler=handoff_handler,
-                ),
-                scheduling_agent=SchedulingAgent(
-                    client=self._openai_client,
-                    model=self._specialist_model,
-                    prompt_renderer=self._prompt_renderer,
-                    find_appointment_slots_handler=find_slots_handler,
-                    select_appointment_slot_handler=select_slot_handler,
-                    book_selected_appointment_handler=booking_handler,
-                ),
-                policy_agent=self._policy_agent,
-            )
-            # On an error, do not overwrite important state already saved by a tool.
             with observe_turn(self._workflow_observer, conversation_id, state.turn_count + 1):
+                if state.phase in {
+                    ConversationPhase.BOOKING_COMPLETE,
+                    ConversationPhase.HANDOFF_COMPLETE,
+                    ConversationPhase.COMPLETED,
+                }:
+                    message = next(
+                        (message.content for message in reversed(state.messages) if message.role == ConversationRole.ASSISTANT),
+                        "This conversation is already complete.", #return last assistant message if available, otherwise default message
+                    )
+                    return AgentTurnResult(state=state, assistant_message=message)
+
+                context = self._build_prompt_context(state)
+                # All handlers share this state; service-backed tools also receive their service client.
+                lookup_handler = create_lookup_customer_handler(
+                    self._legacy_crm_client,
+                    conversation_state=state,
+                    conversation_store=self._conversation_store,
+                )
+                intake_handler = create_record_intake_handler(
+                    conversation_state=state,
+                    conversation_store=self._conversation_store,
+                )
+                handoff_handler = create_request_handoff_handler(
+                    self._handoff_client,
+                    conversation_state=state,
+                    conversation_store=self._conversation_store,
+                )
+                find_slots_handler = create_find_appointment_slots_handler(
+                    self._scheduler_client,
+                    conversation_state=state,
+                    conversation_store=self._conversation_store,
+                )
+                select_slot_handler = create_select_appointment_slot_handler(
+                    conversation_state=state,
+                    conversation_store=self._conversation_store,
+                )
+                booking_handler = create_book_selected_appointment_handler(
+                    self._scheduler_client,
+                    conversation_state=state,
+                    conversation_store=self._conversation_store,
+                    idempotency_key_factory=self._idempotency_key_factory,
+                )
+
+                # Agents configure model calls. Tool definitions go to the model; handlers run in Python.
+                handle = route_and_respond( #configured function that knows which router and specialists to call based on the current conversation state and user message
+                    router=self._router,
+                    renderer=self._prompt_renderer,
+                    verification_agent=VerificationAgent(
+                        client=self._openai_client,
+                        model=self._specialist_model,
+                        prompt_renderer=self._prompt_renderer,
+                        lookup_customer_handler=lookup_handler,
+                    ),
+                    intake_agent=IntakeAgent(
+                        client=self._openai_client,
+                        model=self._specialist_model,
+                        prompt_renderer=self._prompt_renderer,
+                        record_intake_handler=intake_handler,
+                        request_handoff_handler=handoff_handler,
+                    ),
+                    human_handoff_agent=HumanHandoffAgent(
+                        client=self._openai_client,
+                        model=self._specialist_model,
+                        prompt_renderer=self._prompt_renderer,
+                        request_handoff_handler=handoff_handler,
+                    ),
+                    scheduling_agent=SchedulingAgent(
+                        client=self._openai_client,
+                        model=self._specialist_model,
+                        prompt_renderer=self._prompt_renderer,
+                        find_appointment_slots_handler=find_slots_handler,
+                        select_appointment_slot_handler=select_slot_handler,
+                        book_selected_appointment_handler=booking_handler,
+                    ),
+                    policy_agent=self._policy_agent,
+                )
+                # On an error, do not overwrite important state already saved by a tool.
                 assistant_message = await handle(context=context, user_message=user_message)
-            state.messages.extend([
-                ConversationMessage(role=ConversationRole.USER, content=user_message),
-                ConversationMessage(role=ConversationRole.ASSISTANT, content=assistant_message),
-            ])
-            state.turn_count += 1
-            saved = self._conversation_store.save(state)
-            return AgentTurnResult(state=saved, assistant_message=assistant_message)
+                state.messages.extend([
+                    ConversationMessage(role=ConversationRole.USER, content=user_message),
+                    ConversationMessage(role=ConversationRole.ASSISTANT, content=assistant_message),
+                ])
+                state.turn_count += 1
+                saved = self._conversation_store.save(state)
+                return AgentTurnResult(state=saved, assistant_message=assistant_message)
 
 
 __all__ = ["PromptAgentRuntime"]

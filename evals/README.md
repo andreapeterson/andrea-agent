@@ -431,9 +431,13 @@ constructed, and no real CRM, policy, scheduler, or handoff service is contacted
 The only network client is OpenAI, using the official API base URL.
 
 Only caller turns enter the runtime. Expected sequences, outcomes, case IDs, and
-tags stay out of model inputs. A small optional hook records only conversation ID,
-turn number, selected specialist, and tool name, in execution order. It is disabled
-by default and scoped to the current task and turn. It records no caller text,
+tags stay out of model inputs. The optional structured trace hook records turn,
+model-request, specialist, and tool lifecycle events. The evaluator uses only
+`specialist_selected` and `tool_requested` to extract its sequences, so completion
+events never count as extra tool calls. Trace metadata includes conversation ID,
+turn number, event type, and known specialist/tool names, prompt version, model,
+elapsed duration, and execution status. The hook is disabled by default and scoped
+to the current task and turn; observer failures cannot break the workflow. It records no caller text,
 prompts, tool arguments/results, identity facts, credentials, or raw responses.
 Final phase, verification, booking, and handoff outcomes come from saved
 `ConversationState`, never from model prose.
@@ -448,7 +452,9 @@ raw model responses, credentials, or exception chains.
 
 Live runs may make many paid OpenAI calls: ordinarily one Router call per turn,
 one specialist call, and one continuation per tool execution. Tool loops can add
-calls up to their existing production limit. There is no LLM judge, wording grade,
-or latency/token/cost tracking. Final response wording remains evaluated separately
+calls up to their existing production limit. Trace events include operation durations;
+there is no LLM judge, wording grade, or token/cost accounting. Final response wording remains evaluated separately
 by `response_eval.py`. Unit tests use fake OpenAI clients, run the real workflow
 with controlled integrations, and make no paid requests.
+
+See [safe agent traces](../docs/agent_tracing.md) for event lifecycles and emission points.

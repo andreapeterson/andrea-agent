@@ -16,8 +16,11 @@ from app.agents.policy_agent import PolicyAgent
 from app.agents.prompt_renderer import PromptRenderer
 from app.agents.router_agent import RouteDecision
 from app.agents.responses_tool_loop import MalformedToolCallError, ToolLoopLimitError, UnknownAgentToolError, run_agent_turn
+from app.agents.responses_tool_loop import AgentModelRequestError, ToolExecutionError
+from app.agents.prompt_renderer import POLICY_PROMPT_VERSION, ROUTER_PROMPT_VERSION
+from app.agents.router_agent import RouterRequestError
 from app.agents.search_policy_tool import create_search_policy_handler
-from app.agents.workflow_observation import WorkflowEvent, observe_specialist, observe_tool, observe_turn
+from app.agents.workflow_observation import WorkflowEventType, observe_specialist, observe_tool, observe_turn
 from app.integrations import HandoffClient, LegacyCRMClient, SchedulerClient
 from app.models.appointment import AppointmentType, BookingRequest
 from app.models.conversation import ConversationPhase
@@ -135,6 +138,13 @@ def forbid_real_clients_and_network(monkeypatch):
 
 def runner(client):
     return create_live_run_conversation(client, "demo-router-model", "demo-specialist-model", PromptRenderer())
+
+
+def selected_workflow(events):
+    return [(event.conversation_id, event.turn_number, event.specialist, event.tool_name)
+            for event in events if event.event_type in {
+                WorkflowEventType.SPECIALIST_SELECTED, WorkflowEventType.TOOL_REQUESTED,
+            }]
 
 
 def build_runtime(client, observer=None):
@@ -275,14 +285,17 @@ async def test_hook_records_only_allowlisted_fields_and_preserves_tool_order():
     for message in case.caller_turns:
         await runtime.handle_turn("demo-observed", message)
 
-    assert events == [
-        WorkflowEvent("demo-observed", 1, "verification"),
-        WorkflowEvent("demo-observed", 1, "verification", "lookup_customer"),
-        WorkflowEvent("demo-observed", 2, "intake"),
-        WorkflowEvent("demo-observed", 2, "intake", "record_intake"),
-        WorkflowEvent("demo-observed", 2, "intake", "request_handoff"),
+    assert selected_workflow(events) == [
+        ("demo-observed", 1, "verification", None),
+        ("demo-observed", 1, "verification", "lookup_customer"),
+        ("demo-observed", 2, "intake", None),
+        ("demo-observed", 2, "intake", "record_intake"),
+        ("demo-observed", 2, "intake", "request_handoff"),
     ]
-    assert all(set(asdict(event)) == {"conversation_id", "turn_number", "specialist", "tool_name"} for event in events)
+    assert all(set(asdict(event)) == {
+        "conversation_id", "turn_number", "event_type", "specialist", "tool_name",
+        "prompt_version", "duration_ms", "model", "status",
+    } for event in events)
     assert "Maize" not in repr(events) and "202-555" not in repr(events)
     state = store.get("demo-observed")
     assert state.turn_count == 2
@@ -304,7 +317,160 @@ async def test_optional_hook_does_not_change_model_requests_state_or_replies():
     assert results[0] == results[1]
     assert clients[0].responses.parse_calls == clients[1].responses.parse_calls
     assert clients[0].responses.create_calls == clients[1].responses.create_calls
-    assert len(events) == 2
+    assert sum(event.event_type == WorkflowEventType.TURN_COMPLETED for event in events) == 1
+    assert len(selected_workflow(events)) == 2
+
+
+@pytest.mark.asyncio
+async def test_trace_lifecycle_has_request_metadata_and_completes_after_state_save():
+    events = []
+    client = FakeOpenAI(*script(0))
+    runtime, store = build_runtime(client, events.append)
+    await runtime.start_conversation("demo-lifecycle")
+    assert events == []  # The initial greeting is not a caller turn.
+    save = store.save
+
+    def save_before_turn_completion(state):
+        assert events[-1].event_type == WorkflowEventType.MODEL_REQUEST_COMPLETED
+        return save(state)
+
+    store.save = save_before_turn_completion
+    await runtime.handle_turn("demo-lifecycle", "What are your clinic hours?")
+    assert [event.event_type.value for event in events] == [
+        "turn_started", "model_request_started", "model_request_completed",
+        "specialist_selected", "model_request_started", "model_request_completed",
+        "tool_requested", "tool_completed", "model_request_started", "model_request_completed",
+        "turn_completed",
+    ]
+    assert {(event.conversation_id, event.turn_number) for event in events} == {("demo-lifecycle", 1)}
+    requests = [event for event in events if event.event_type == WorkflowEventType.MODEL_REQUEST_STARTED]
+    assert [(event.specialist, event.model, event.prompt_version) for event in requests] == [
+        (None, "demo-router-model", ROUTER_PROMPT_VERSION),
+        ("policy", "demo-specialist-model", POLICY_PROMPT_VERSION),
+        ("policy", "demo-specialist-model", POLICY_PROMPT_VERSION),
+    ]
+    for event in events:
+        if event.event_type in {
+            WorkflowEventType.MODEL_REQUEST_COMPLETED, WorkflowEventType.TOOL_COMPLETED, WorkflowEventType.TURN_COMPLETED,
+        }:
+            assert event.duration_ms >= 0 and event.status == "succeeded"
+        else:
+            assert event.duration_ms is None and event.status is None
+    assert store.get("demo-lifecycle").turn_count == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("broken_event", [kind for kind in WorkflowEventType if kind != WorkflowEventType.TURN_FAILED])
+async def test_observer_failure_cannot_change_caller_reply_state_or_requests(broken_event, capsys):
+    events = []
+
+    def broken_observer(event):
+        events.append(event)
+        if event.event_type == broken_event:
+            raise RuntimeError("PRIVATE_OBSERVER_EXCEPTION and secret credentials")
+
+    clients = [FakeOpenAI(*script(0)), FakeOpenAI(*script(0))]
+    results = []
+    for client, observer in zip(clients, (None, broken_observer), strict=True):
+        runtime, store = build_runtime(client, observer)
+        await runtime.start_conversation("demo-observer-failure")
+        result = await runtime.handle_turn("demo-observer-failure", "What are your clinic hours?")
+        results.append((result, store.get("demo-observer-failure")))
+    assert results[0] == results[1]
+    assert clients[0].responses.parse_calls == clients[1].responses.parse_calls
+    assert clients[0].responses.create_calls == clients[1].responses.create_calls
+    assert events[-1].event_type == WorkflowEventType.TURN_COMPLETED
+    output = capsys.readouterr()
+    assert output.out == output.err == ""
+
+
+@pytest.mark.asyncio
+async def test_trace_contains_no_private_content_and_is_never_sent_to_model(monkeypatch):
+    events = []
+    private = "PRIVATE_CALLER_MESSAGE_PRIVATE_RESULT"
+    monkeypatch.setenv("OPENAI_API_KEY", "PRIVATE_API_KEY_VALUE")
+    client = FakeOpenAI(["verification"], [tool("lookup_customer", {"phone": "202-555-0142"}), speech(private)])
+    runtime, _ = build_runtime(client, events.append)
+    await runtime.start_conversation("demo-private")
+    await runtime.handle_turn("demo-private", private + " My phone number is 202-555-0142.")
+    serialized = json.dumps([asdict(event) for event in events])
+    for forbidden in (
+        private, "PRIVATE_API_KEY_VALUE", "202-555-0142", "Avery", "Maize",
+        "demo-customer-0142", "demo-pet-maize-0142", "call-lookup_customer",
+        "Identify a caller", "authorization", "arguments", "output_text", "traceback",
+    ):
+        assert forbidden not in serialized
+    assert "Customer verified:" not in serialized
+    for request in client.responses.parse_calls + client.responses.create_calls:
+        assert "workflow_observer" not in request
+        assert "events" not in request
+        assert "turn_started" not in repr(request)
+        assert "tool_completed" not in repr(request)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("stage, error_type", [
+    ("router", RouterRequestError), ("model", AgentModelRequestError),
+    ("tool", ToolExecutionError), ("save", RuntimeError),
+])
+async def test_failures_emit_safe_status_without_masking_workflow_error(stage, error_type):
+    events = []
+    private_error = "PRIVATE_EXCEPTION_DETAIL tool arguments phone=202-555-0142 secret-key"
+    if stage == "router":
+        client = FakeOpenAI([RuntimeError(private_error)], [])
+    elif stage == "model":
+        client = FakeOpenAI(["policy"], [RuntimeError(private_error)])
+    elif stage == "tool":
+        client = FakeOpenAI(["policy"], [tool("search_policy", {"query": private_error, "extra": private_error})])
+    else:
+        client = FakeOpenAI(["policy"], [speech()])
+    runtime, store = build_runtime(client, events.append)
+    await runtime.start_conversation("demo-failed-turn")
+    if stage == "save":
+        def fail_save(state):
+            raise RuntimeError(private_error)
+        store.save = fail_save
+    with pytest.raises(error_type):
+        await runtime.handle_turn("demo-failed-turn", "What are your clinic hours?")
+    assert events[-1].event_type == WorkflowEventType.TURN_FAILED
+    assert events[-1].status == "failed" and events[-1].duration_ms >= 0
+    assert not any(event.event_type == WorkflowEventType.TURN_COMPLETED for event in events)
+    serialized = json.dumps([asdict(event) for event in events])
+    assert private_error not in serialized and "secret-key" not in serialized
+    if stage in {"router", "model"}:
+        assert events[-2].event_type == WorkflowEventType.MODEL_REQUEST_COMPLETED
+        assert events[-2].status == "failed"
+    if stage == "tool":
+        assert events[-2].event_type == WorkflowEventType.TOOL_COMPLETED
+        assert events[-2].status == "failed"
+
+
+@pytest.mark.asyncio
+async def test_failed_turn_observer_does_not_replace_original_model_failure():
+    original = RuntimeError("PRIVATE_MODEL_EXCEPTION")
+
+    def broken_observer(event):
+        raise ValueError("PRIVATE_OBSERVER_EXCEPTION")
+
+    client = FakeOpenAI(["policy"], [original])
+    runtime, _ = build_runtime(client, broken_observer)
+    await runtime.start_conversation("demo-original-error")
+    with pytest.raises(AgentModelRequestError) as caught:
+        await runtime.handle_turn("demo-original-error", "Clinic hours?")
+    assert caught.value.__cause__ is original
+
+
+@pytest.mark.asyncio
+async def test_successful_tool_execution_status_does_not_claim_a_business_outcome():
+    events = []
+    client = FakeOpenAI(["policy"], [tool("search_policy", {"query": "prices"}), speech()])
+    runtime, _ = build_runtime(client, events.append)
+    await runtime.start_conversation("demo-empty-policy")
+    await runtime.handle_turn("demo-empty-policy", "What are your prices?")
+    result = json.loads(client.responses.create_calls[-1]["input"][-1]["output"])
+    assert result == {"found": False, "evidence": []}
+    completed, = [event for event in events if event.event_type == WorkflowEventType.TOOL_COMPLETED]
+    assert completed.status == "succeeded"
 
 
 @pytest.mark.asyncio
@@ -314,12 +480,15 @@ async def test_concurrent_conversations_do_not_share_hook_scopes():
     second, _ = build_runtime(FakeOpenAI(["verification"], [tool("lookup_customer", {"phone": "202-555-0142"}), speech()]), events.append)
     await asyncio.gather(first.start_conversation("demo-first"), second.start_conversation("demo-second"))
     await asyncio.gather(first.handle_turn("demo-first", "Hours?"), second.handle_turn("demo-second", "202-555-0142"))
-    assert [event for event in events if event.conversation_id == "demo-first"] == [
-        WorkflowEvent("demo-first", 1, "policy"), WorkflowEvent("demo-first", 1, "policy", "search_policy"),
+    assert selected_workflow([event for event in events if event.conversation_id == "demo-first"]) == [
+        ("demo-first", 1, "policy", None), ("demo-first", 1, "policy", "search_policy"),
     ]
-    assert [event for event in events if event.conversation_id == "demo-second"] == [
-        WorkflowEvent("demo-second", 1, "verification"), WorkflowEvent("demo-second", 1, "verification", "lookup_customer"),
+    assert selected_workflow([event for event in events if event.conversation_id == "demo-second"]) == [
+        ("demo-second", 1, "verification", None), ("demo-second", 1, "verification", "lookup_customer"),
     ]
+    assert all(event.turn_number == 1 for event in events)
+    assert all(event.specialist in {None, "policy"} for event in events if event.conversation_id == "demo-first")
+    assert all(event.specialist in {None, "verification"} for event in events if event.conversation_id == "demo-second")
 
 
 @pytest.mark.asyncio
@@ -341,11 +510,14 @@ async def test_hook_records_only_calls_accepted_for_execution_and_cleans_up_on_e
                 tools=[], tool_handlers={"lookup_customer": handler},
                 max_tool_rounds=0 if invalid == "limit" else 3,
             )
-    assert events == [WorkflowEvent("demo-rejected-tool", 1, "verification")]
+    assert selected_workflow(events) == [("demo-rejected-tool", 1, "verification", None)]
+    assert events[-1].event_type == WorkflowEventType.TURN_FAILED
+    before = list(events)
     handler.assert_not_awaited()
     observe_specialist("policy")
-    observe_tool("search_policy")
-    assert len(events) == 1
+    with observe_tool("search_policy"):
+        pass
+    assert events == before
 
 
 @pytest.mark.asyncio
