@@ -436,7 +436,8 @@ model-request, specialist, and tool lifecycle events. The evaluator uses only
 `specialist_selected` and `tool_requested` to extract its sequences, so completion
 events never count as extra tool calls. Trace metadata includes conversation ID,
 turn number, event type, and known specialist/tool names, prompt version, model,
-elapsed duration, and execution status. The hook is disabled by default and scoped
+elapsed duration, execution status, and validated optional token counts on completed
+model requests. The hook is disabled by default and scoped
 to the current task and turn; observer failures cannot break the workflow. It records no caller text,
 prompts, tool arguments/results, identity facts, credentials, or raw responses.
 Final phase, verification, booking, and handoff outcomes come from saved
@@ -452,8 +453,10 @@ raw model responses, credentials, or exception chains.
 
 Live runs may make many paid OpenAI calls: ordinarily one Router call per turn,
 one specialist call, and one continuation per tool execution. Tool loops can add
-calls up to their existing production limit. Trace events include operation durations;
-there is no LLM judge, wording grade, or token/cost accounting. Final response wording remains evaluated separately
+calls up to their existing production limit. Trace events include operation durations
+and available token counts. Pure turn summaries and optional estimates using injected
+rates are documented below; they do not alter evaluation scoring or runtime behavior.
+There is no LLM judge or wording grade. Final response wording remains evaluated separately
 by `response_eval.py`. Unit tests use fake OpenAI clients, run the real workflow
 with controlled integrations, and make no paid requests.
 

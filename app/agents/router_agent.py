@@ -61,7 +61,7 @@ class OpenAIRouter:
             raise RouterRequestError("User message cannot be blank.")
 
         try:
-            with observe_model_request(self._model, prompt_version=ROUTER_PROMPT_VERSION):
+            with observe_model_request(self._model, prompt_version=ROUTER_PROMPT_VERSION) as record_usage:
                 parse_result = self._client.responses.parse( #response.parse is used when we require 1 specific result/ text_format
                     model=self._model,
                     input=user_message,
@@ -72,6 +72,7 @@ class OpenAIRouter:
                     response = await parse_result
                 else: #normally the OpenAI call is asynchronous and must be awaited. this supports simple synchronous fake clients used in tests.
                     response = parse_result
+                record_usage(response)
         except Exception as exc:
             raise RouterRequestError("Router request failed.") from exc #request problem
 

@@ -2,7 +2,9 @@
 
 import asyncio
 import json
+import weakref
 from dataclasses import FrozenInstanceError, asdict
+from types import SimpleNamespace
 
 import pytest
 
@@ -10,6 +12,7 @@ from app.agents import workflow_observation
 from app.agents.workflow_observation import (
     WorkflowEvent,
     WorkflowEventType,
+    extract_token_usage,
     observe_model_request,
     observe_specialist,
     observe_tool,
@@ -98,3 +101,82 @@ async def test_cancellation_records_failure_and_resets_context_without_swallowin
     with observe_tool("search_policy"):
         pass
     assert events == before
+
+
+@pytest.mark.parametrize("bad", [-1, True, False, 1.5, "12", float("nan"), [], {}])
+def test_malformed_usage_values_are_ignored_without_coercion(bad):
+    response = SimpleNamespace(usage=SimpleNamespace(input_tokens=bad, output_tokens=0, total_tokens=2))
+    assert extract_token_usage(response) == {"input_tokens": None, "output_tokens": 0, "total_tokens": 2}
+    with pytest.raises(ValueError, match="nonnegative integers"):
+        WorkflowEvent("demo", 1, WorkflowEventType.MODEL_REQUEST_COMPLETED, input_tokens=bad)
+
+
+@pytest.mark.parametrize("response", [None, object(), {}, {"usage": None}, {"usage": []}])
+def test_missing_usage_produces_unknown_counts(response):
+    assert extract_token_usage(response) == {"input_tokens": None, "output_tokens": None, "total_tokens": None}
+
+
+def test_usage_access_failures_are_ignored_and_nested_details_are_never_read():
+    class BrokenResponse:
+        @property
+        def usage(self):
+            raise RuntimeError("PRIVATE_API_RESPONSE_EXCEPTION")
+
+    assert all(value is None for value in extract_token_usage(BrokenResponse()).values())
+
+    class Usage:
+        input_tokens = 4
+        output_tokens = 2
+
+        @property
+        def total_tokens(self):
+            raise RuntimeError("PRIVATE_USAGE_EXCEPTION")
+
+        @property
+        def input_tokens_details(self):
+            raise AssertionError("Do not read cached prompt details")
+
+        @property
+        def output_tokens_details(self):
+            raise AssertionError("Do not read reasoning details")
+
+    assert extract_token_usage(SimpleNamespace(usage=Usage())) == {
+        "input_tokens": 4, "output_tokens": 2, "total_tokens": None,
+    }
+
+
+def test_capture_keeps_only_integer_counts_not_the_response():
+    class Response:
+        usage = {"input_tokens": 4, "output_tokens": 2, "total_tokens": 6}
+
+        def model_dump(self):
+            raise AssertionError("Do not serialize the raw OpenAI response")
+
+    events = []
+    response = Response()
+    reference = weakref.ref(response)
+    with observe_turn(events.append, "demo-usage", 1):
+        with observe_model_request("model") as record_usage:
+            record_usage(response)
+    del response
+    assert reference() is None
+    completed = events[2]
+    assert completed.event_type == WorkflowEventType.MODEL_REQUEST_COMPLETED
+    assert (completed.input_tokens, completed.output_tokens, completed.total_tokens) == (4, 2, 6)
+    assert all(event.input_tokens is None for event in events if event is not completed)
+
+
+def test_disabled_observer_does_not_inspect_usage():
+    class Response:
+        @property
+        def usage(self):
+            pytest.fail("No usage inspection is needed when observation is disabled")
+
+    with observe_turn(None, "demo-disabled", 1):
+        with observe_model_request("model") as record_usage:
+            record_usage(Response())
+
+
+def test_token_counts_cannot_be_attached_to_non_model_events():
+    with pytest.raises(ValueError, match="only to model_request_completed"):
+        WorkflowEvent("demo", 1, WorkflowEventType.TOOL_COMPLETED, input_tokens=1)

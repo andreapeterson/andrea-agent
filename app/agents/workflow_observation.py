@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
@@ -24,7 +24,9 @@ class WorkflowEventType(str, Enum):
 
 @dataclass(frozen=True)
 class WorkflowEvent:
-    """Only explicit metadata belongs here, never payloads or exception objects."""
+    """Only explicit metadata belongs here, never payloads or exception objects.
+    represents one thing that happened in a workflow turn, with optional timing and token counts.
+    frozen = once created, never modified """
 
     conversation_id: str
     turn_number: int
@@ -35,27 +37,39 @@ class WorkflowEvent:
     duration_ms: float | None = None
     model: str | None = None
     status: Literal["succeeded", "failed"] | None = None
+    input_tokens: int | None = None
+    output_tokens: int | None = None
+    total_tokens: int | None = None
+
+    def __post_init__(self) -> None:
+        for value in (self.input_tokens, self.output_tokens, self.total_tokens):
+            if value is not None:
+                if type(value) is not int or value < 0:
+                    raise ValueError("Token counts must be nonnegative integers or None")
+                if self.event_type != WorkflowEventType.MODEL_REQUEST_COMPLETED:
+                    raise ValueError("Token counts belong only to model_request_completed events")
 
 
-WorkflowObserver = Callable[[WorkflowEvent], None]
+WorkflowObserver = Callable[[WorkflowEvent], None] #any function that takes a WorkflowEvent and returns None
 
 
 @dataclass(frozen=True)
-class _TurnObservation:
-    observer: WorkflowObserver
+class _TurnObservation: #temporary information needed while turn is running, shared context to build events
+    observer: WorkflowObserver #function that receives finished event
     conversation_id: str
     turn_number: int
     specialist: str | None = None
     prompt_version: str | None = None
 
 
-_current_turn: ContextVar[_TurnObservation | None] = ContextVar("workflow_observation", default=None)
+_current_turn: ContextVar[_TurnObservation | None] = ContextVar("workflow_observation", default=None) #not a global variable bc it could be overwritten
 
 
-def _safe_emit(
+def _safe_emit( #creates and sends one event
     event_type: WorkflowEventType, *, tool_name: str | None = None,
     prompt_version: str | None = None, duration_ms: float | None = None,
     model: str | None = None, status: Literal["succeeded", "failed"] | None = None,
+    input_tokens: int | None = None, output_tokens: int | None = None, total_tokens: int | None = None,
 ) -> None:
     turn = _current_turn.get()
     if turn is None:
@@ -66,17 +80,19 @@ def _safe_emit(
             event_type=event_type, specialist=turn.specialist, tool_name=tool_name,
             prompt_version=prompt_version if prompt_version is not None else turn.prompt_version,
             duration_ms=duration_ms, model=model, status=status,
+            input_tokens=input_tokens, output_tokens=output_tokens, total_tokens=total_tokens,
         ))
     except Exception:
-        # Observability is secondary. Do not log the observer's exception or recurse.
+        # Observability is secondary. Do not log the observer's exception or recurse. agent workflow more important than observability
         pass
 
 
 @contextmanager
-def _observe_operation(
+def _observe_operation( #core reusable timer 
     started_event: WorkflowEventType, completed_event: WorkflowEventType, *,
     failed_event: WorkflowEventType | None = None, tool_name: str | None = None,
     model: str | None = None, prompt_version: str | None = None,
+    token_usage: dict[str, int | None] | None = None,
 ) -> Iterator[None]:
     if _current_turn.get() is None:
         yield
@@ -84,18 +100,20 @@ def _observe_operation(
     started = perf_counter()
     _safe_emit(started_event, tool_name=tool_name, model=model, prompt_version=prompt_version)
     try:
-        yield
+        yield #run actual code inside with block, if it fails, emit failed event, otherwise emit completed event
     except BaseException:
         _safe_emit(
             failed_event or completed_event, tool_name=tool_name, model=model,
             prompt_version=prompt_version, duration_ms=(perf_counter() - started) * 1000,
             status="failed",
+            **(token_usage or {}), #Take the key-value pairs inside token_usage and pass them as named arguments. If token_usage is None, use an empty dictionary instead.
         )
         raise
     else:
         _safe_emit(
             completed_event, tool_name=tool_name, model=model, prompt_version=prompt_version,
             duration_ms=(perf_counter() - started) * 1000, status="succeeded",
+            **(token_usage or {}),
         )
 
 
@@ -123,13 +141,38 @@ def observe_specialist(specialist: str, *, prompt_version: str | None = None) ->
         _safe_emit(WorkflowEventType.SPECIALIST_SELECTED)
 
 
+def _usage_field(value: object, name: str) -> object: #Get input_tokens whether usage is a dictionary or an object. Return None if it is missing or broken. parses reponse to get usage field 
+    try:
+        return value.get(name) if isinstance(value, Mapping) else getattr(value, name, None)
+    except Exception:
+        return None
+
+
+def extract_token_usage(response: object) -> dict[str, int | None]:
+    """Copy only three integer counters; never serialize or retain the response."""
+    usage = _usage_field(response, "usage")
+    counters = {}
+    for field in ("input_tokens", "output_tokens", "total_tokens"):
+        value = _usage_field(usage, field)
+        counters[field] = value if type(value) is int and value >= 0 else None
+    return counters
+
+
 @contextmanager
-def observe_model_request(model: str, *, prompt_version: str | None = None) -> Iterator[None]:
+def observe_model_request(
+    model: str, *, prompt_version: str | None = None,
+) -> Iterator[Callable[[object], None]]:
+    usage: dict[str, int | None] = {}
+
+    def record_usage(response: object) -> None:
+        if _current_turn.get() is not None:
+            usage.update(extract_token_usage(response))
+
     with _observe_operation(
         WorkflowEventType.MODEL_REQUEST_STARTED, WorkflowEventType.MODEL_REQUEST_COMPLETED,
-        model=model, prompt_version=prompt_version,
+        model=model, prompt_version=prompt_version, token_usage=usage,
     ):
-        yield
+        yield record_usage
 
 
 @contextmanager

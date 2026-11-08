@@ -21,6 +21,7 @@ from app.agents.prompt_renderer import POLICY_PROMPT_VERSION, ROUTER_PROMPT_VERS
 from app.agents.router_agent import RouterRequestError
 from app.agents.search_policy_tool import create_search_policy_handler
 from app.agents.workflow_observation import WorkflowEventType, observe_specialist, observe_tool, observe_turn
+from app.agents.turn_trace_summary import format_turn_trace_summary, summarize_turn_trace
 from app.integrations import HandoffClient, LegacyCRMClient, SchedulerClient
 from app.models.appointment import AppointmentType, BookingRequest
 from app.models.conversation import ConversationPhase
@@ -81,7 +82,10 @@ class FakeResponses:
         result = self.routes.pop(0)
         if isinstance(result, Exception):
             raise result
-        return SimpleNamespace(output_parsed=RouteDecision(destination=result, reason="Scripted route."))
+        response = SimpleNamespace(output_parsed=RouteDecision(destination=result, reason="Scripted route."))
+        if hasattr(self, "route_usage"):
+            response.usage = self.route_usage
+        return response
 
     async def create(self, **request):
         self.create_calls.append(deepcopy(request))
@@ -295,6 +299,7 @@ async def test_hook_records_only_allowlisted_fields_and_preserves_tool_order():
     assert all(set(asdict(event)) == {
         "conversation_id", "turn_number", "event_type", "specialist", "tool_name",
         "prompt_version", "duration_ms", "model", "status",
+        "input_tokens", "output_tokens", "total_tokens",
     } for event in events)
     assert "Maize" not in repr(events) and "202-555" not in repr(events)
     state = store.get("demo-observed")
@@ -393,7 +398,7 @@ async def test_trace_contains_no_private_content_and_is_never_sent_to_model(monk
     runtime, _ = build_runtime(client, events.append)
     await runtime.start_conversation("demo-private")
     await runtime.handle_turn("demo-private", private + " My phone number is 202-555-0142.")
-    serialized = json.dumps([asdict(event) for event in events])
+    serialized = json.dumps([asdict(event) for event in events]) + format_turn_trace_summary(summarize_turn_trace(events))
     for forbidden in (
         private, "PRIVATE_API_KEY_VALUE", "202-555-0142", "Avery", "Maize",
         "demo-customer-0142", "demo-pet-maize-0142", "call-lookup_customer",
@@ -471,6 +476,67 @@ async def test_successful_tool_execution_status_does_not_claim_a_business_outcom
     assert result == {"found": False, "evidence": []}
     completed, = [event for event in events if event.event_type == WorkflowEventType.TOOL_COMPLETED]
     assert completed.status == "succeeded"
+
+
+@pytest.mark.asyncio
+async def test_router_and_specialist_usage_aggregate_across_the_real_tool_loop():
+    events = []
+    routes, outputs = script(0)
+    outputs[0].usage = SimpleNamespace(input_tokens=15, output_tokens=3, total_tokens=18)
+    outputs[1].usage = {"input_tokens": 20, "output_tokens": 4, "total_tokens": 24}
+    client = FakeOpenAI(routes, outputs)
+    client.responses.route_usage = SimpleNamespace(input_tokens=10, output_tokens=2, total_tokens=12)
+    runtime, _ = build_runtime(client, events.append)
+    await runtime.start_conversation("demo-token-turn")
+    await runtime.handle_turn("demo-token-turn", "Clinic hours?")
+    completed = [event for event in events if event.event_type == WorkflowEventType.MODEL_REQUEST_COMPLETED]
+    assert [(event.model, event.input_tokens, event.output_tokens, event.total_tokens) for event in completed] == [
+        ("demo-router-model", 10, 2, 12),
+        ("demo-specialist-model", 15, 3, 18),
+        ("demo-specialist-model", 20, 4, 24),
+    ]
+    summary = summarize_turn_trace(events)
+    assert summary.model_request_count == 3
+    assert (summary.input_tokens, summary.output_tokens, summary.total_tokens) == (45, 9, 54)
+    assert summary.tool_names == ("search_policy",)
+    assert summary.outcome == "completed"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("usage", [None, {}, {"input_tokens": -1, "output_tokens": True, "total_tokens": "10"}])
+async def test_missing_or_malformed_usage_cannot_fail_the_workflow(usage):
+    events = []
+    response = speech()
+    response.usage = usage
+    client = FakeOpenAI(["policy"], [response])
+    client.responses.route_usage = usage
+    runtime, store = build_runtime(client, events.append)
+    await runtime.start_conversation("demo-unknown-usage")
+    result = await runtime.handle_turn("demo-unknown-usage", "Clinic hours?")
+    assert result.assistant_message == "Controlled caller-facing reply."
+    assert store.get("demo-unknown-usage").turn_count == 1
+    summary = summarize_turn_trace(events)
+    assert summary.outcome == "completed" and summary.model_request_count == 2
+    assert summary.input_tokens is summary.output_tokens is summary.total_tokens is None
+
+
+@pytest.mark.asyncio
+async def test_summary_failure_in_an_observer_cannot_affect_the_saved_turn(capsys):
+    events = []
+
+    def observer(event):
+        events.append(event)
+        if event.event_type == WorkflowEventType.TURN_COMPLETED:
+            summarize_turn_trace(events[:-1])  # Deliberately incomplete trace.
+
+    runtime, store = build_runtime(FakeOpenAI(*script(0)), observer)
+    await runtime.start_conversation("demo-summary-failure")
+    result = await runtime.handle_turn("demo-summary-failure", "Clinic hours?")
+    assert result.assistant_message == "Controlled caller-facing reply."
+    assert store.get("demo-summary-failure").turn_count == 1
+    assert summarize_turn_trace(events).outcome == "completed"
+    output = capsys.readouterr()
+    assert output.out == output.err == ""
 
 
 @pytest.mark.asyncio

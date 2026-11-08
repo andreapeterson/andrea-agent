@@ -55,7 +55,7 @@ async def run_agent_turn(
     while True:
         # First model request: the model either answers or asks for a tool.
         try:
-            with observe_model_request(model):
+            with observe_model_request(model) as record_usage:
                 response = await client.responses.create(
                     model=model,
                     instructions=instructions,
@@ -63,6 +63,7 @@ async def run_agent_turn(
                     tools=tools,
                     parallel_tool_calls=False, #model can only request 1 tool at a time
                 )
+                record_usage(response)
         except Exception as exc:
             raise AgentModelRequestError("The OpenAI Responses API request failed.") from exc
 
