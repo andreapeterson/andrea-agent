@@ -461,3 +461,37 @@ by `response_eval.py`. Unit tests use fake OpenAI clients, run the real workflow
 with controlled integrations, and make no paid requests.
 
 See [safe agent traces](../docs/agent_tracing.md) for event lifecycles and emission points.
+
+## Failure localization (7E3A)
+
+The evaluation harnesses measure behavior. `failure_attribution.py` adds a pure,
+deterministic analysis layer that localizes failures to the observed component;
+it does not diagnose a guaranteed root cause or change any score.
+
+```python
+from evals.failure_attribution import (
+    attribute_report_failures,
+    format_failure_attribution_report,
+    summarize_failure_attributions,
+)
+
+attributions = attribute_report_failures(report, eval_type="specialist")
+summary = summarize_failure_attributions(attributions)
+print(format_failure_attribution_report(attributions))
+```
+
+Choose `router`, `specialist`, `response`, or `conversation` explicitly. The layer
+validates report counts and required result fields without changing the report.
+It returns a tuple of frozen models ordered by case ID and fixed check/criterion
+order. Passing cases produce none; one case can produce several observations.
+
+Response attributions use only safe human-written criterion IDs/descriptions.
+An overall failed response grade without failed criteria receives a generic
+response attribution. Judge explanations, generated text, prompts, caller data,
+tool payloads, credentials, and exception details are excluded. The formatter
+shows only component counts and case IDs; counts represent observations rather
+than unique failed cases.
+
+Localization is evidence for investigation, not proof of root cause. Developers
+still inspect the suggested prompt, schema, fixture, handler, or state transition.
+This layer makes no model requests and performs no automatic prompt rewriting.
