@@ -510,3 +510,54 @@ response_generation: 1 (cases: another_case)
 Localization makes no additional model call and requires no new flag. Passing
 runs print only the original report. If localization rejects an inconsistent
 report, the command returns 1 with a local safe error and prints no report data.
+
+## Portable evaluation assets (7E4A)
+
+The four JSONL files contain the stable human-labeled cases. `portable_manifest.json`
+identifies their exact version with repository-relative paths, case counts, sorted
+case IDs and unique tags, and SHA-256 hashes of the exact file bytes. It duplicates
+no cases and contains no timestamps, local absolute paths, or environment values.
+Suite order is always Router, specialist, response, conversation. Strict frozen
+Pydantic models reject extra fields, duplicate IDs/suites, and noncanonical ordering.
+Each existing JSONL loader still owns validation of its cases.
+
+Print canonical manifest JSON:
+
+```bash
+uv run python -m evals.export_portable_manifest
+```
+
+Check the tracked manifest against the current datasets without changing it:
+
+```bash
+uv run python -m evals.export_portable_manifest --check evals/portable_manifest.json
+```
+
+Check mode returns 0 for an exact match of canonical JSON bytes, or 1 with a safe
+message for a stale, missing, or unreadable manifest or invalid dataset. A whitespace
+or line-ending change in a JSONL file changes its hash even if case labels are the
+same. The builder also rejects a file that changes during loader validation.
+Export is offline and has no automatic write option. To generate or refresh the
+tracked file explicitly, redirect the project command's output:
+
+```bash
+uv run python -m evals.export_portable_manifest > evals/portable_manifest.json
+```
+
+Existing harnesses accept injected callables. A future runtime supplies an adapter
+that converts its output into PawLine's existing destinations, first-action,
+response/judge, or conversation observation types. Adapters may change while the
+cases and scoring remain unchanged:
+
+```text
+same router_cases.jsonl
+    -> Responses adapter
+    -> Decisions adapter
+    -> Jev adapter
+    -> same run_router_evaluation scorer
+```
+
+Matching dataset hashes are required for fair benchmark comparisons. Record the
+manifest alongside benchmark results so runs can identify the same evaluation
+assets. This manifest versions datasets only; it does not version scoring code,
+prompts, model configuration, or adapters. No new runtime adapter is implemented here.
