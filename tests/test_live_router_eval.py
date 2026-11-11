@@ -225,7 +225,9 @@ def test_all_cases_runs_only_when_explicitly_selected_and_returns_one_on_mismatc
     assert len(client.responses.calls) == 25
     assert client.responses.max_active == 1
     assert client.closed
-    assert "Total: 25\nPassed: 5\nFailed: 20" in capsys.readouterr().out
+    output = capsys.readouterr().out
+    assert "Total: 25\nPassed: 5\nFailed: 20" in output
+    assert "\n\nFailure localization\nTotal attributions: 20\nrouter_selection: 20 (cases:" in output
 
 
 @pytest.mark.parametrize("cli_model, env_model, expected", [

@@ -24,6 +24,7 @@ from app.models.policy import PolicyChunk
 from app.models.retrieval import PolicySearchResult
 from app.services.conversation_store import InMemoryConversationStore
 from app.services.prompt_agent_runtime import PromptAgentRuntime
+from evals.failure_attribution import attribute_report_failures, format_failure_attribution_report
 from evals.conversation_eval import (
     ConversationEvalCase,
     ConversationRunObservation,
@@ -210,6 +211,16 @@ def main(argv: Sequence[str] | None = None) -> int:
     selected_cases = [case for case in cases if args.all_cases or case.case_id in requested_ids]
     try:
         report = asyncio.run(_evaluate(selected_cases, api_key, args.router_model.strip(), args.specialist_model.strip()))
+    except Exception:
+        print("Live conversation evaluation failed; no report was produced.", file=sys.stderr)
+        return 1
+    try:
+        attributions = attribute_report_failures(report, eval_type="conversation")
+        localization = format_failure_attribution_report(attributions) if attributions else None
+    except Exception:
+        print("Live conversation failure localization failed; no report was produced.", file=sys.stderr)
+        return 1
+    try:
         text = format_conversation_report(report)
         if api_key in text:
             raise LiveConversationEvaluationError("Unsafe evaluation report")
@@ -217,6 +228,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         print("Live conversation evaluation failed; no report was produced.", file=sys.stderr)
         return 1
     print(text)
+    if localization is not None:
+        print()
+        print(localization)
     return 1 if report["failed"] else 0
 
 

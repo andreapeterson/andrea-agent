@@ -541,6 +541,8 @@ def test_failed_judgment_returns_exit_one_and_reports_failed_criteria(cli_setup,
     output = capsys.readouterr()
     assert "Passed: 0\nFailed: 1" in output.out
     assert "acknowledge_not_found" in output.out
+    assert f"\n\nFailure localization\nTotal attributions: 1\nresponse_generation: 1 (cases: {SMOKE_CASE})" in output.out
+    assert len(client.responses.calls) == len(client.responses.judge_calls) == 1
 
 
 def test_api_key_in_a_structured_judge_reason_is_not_printed(cli_setup, capsys):

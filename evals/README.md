@@ -495,3 +495,18 @@ than unique failed cases.
 Localization is evidence for investigation, not proof of root cause. Developers
 still inspect the suggested prompt, schema, fixture, handler, or state transition.
 This layer makes no model requests and performs no automatic prompt rewriting.
+
+The live Router, specialist, response, and conversation commands now append a
+localization section only when the evaluation has failures. The original detailed
+report appears first, followed by a summary in this format:
+
+```text
+Failure localization
+Total attributions: 2
+tool_arguments: 1 (cases: example_case)
+response_generation: 1 (cases: another_case)
+```
+
+Localization makes no additional model call and requires no new flag. Passing
+runs print only the original report. If localization rejects an inconsistent
+report, the command returns 1 with a local safe error and prints no report data.

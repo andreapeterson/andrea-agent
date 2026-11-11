@@ -356,6 +356,18 @@ def test_selected_cases_are_sequential_and_duplicate_ids_run_once(cli_setup, cap
     assert "Total: 2\nPassed: 2" in capsys.readouterr().out
 
 
+def test_argument_failure_adds_localization_without_another_model_or_judge_call(cli_setup, capsys) -> None:
+    client, _ = cli_setup
+    client.responses.results = [SimpleNamespace(output=[function_call(arguments='{"phone":"202-555-9999"}')])]
+    assert live_specialist_eval.main(["--confirm-live", "--case-id", TOOL_CASE]) == 1
+    assert len(client.responses.calls) == 1
+    assert client.responses.judge_calls == []
+    output = capsys.readouterr()
+    assert "\n\nFailure localization\nTotal attributions: 1\n" in output.out
+    assert f"tool_arguments: 1 (cases: {TOOL_CASE})" in output.out
+    assert output.err == ""
+
+
 def test_all_cases_require_explicit_selection_and_mismatches_exit_one(cli_setup, capsys) -> None:
     client, _ = cli_setup
     assert live_specialist_eval.main(["--confirm-live", "--all-cases"]) == 1

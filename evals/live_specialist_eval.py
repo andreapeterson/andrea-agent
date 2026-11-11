@@ -18,6 +18,7 @@ from app.agents.record_intake_tool import RECORD_INTAKE_TOOL
 from app.agents.request_handoff_tool import REQUEST_HANDOFF_TOOL
 from app.agents.scheduling_tools import BOOK_SELECTED_APPOINTMENT_TOOL, FIND_APPOINTMENT_SLOTS_TOOL, SELECT_APPOINTMENT_SLOT_TOOL
 from app.agents.search_policy_tool import SEARCH_POLICY_TOOL
+from evals.failure_attribution import attribute_report_failures, format_failure_attribution_report
 from evals.specialist_eval import (
     SemanticGrade,
     SemanticGrader,
@@ -198,7 +199,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         # Exception chains can contain credentials, prompts, or raw upstream responses.
         print("Live specialist evaluation failed; no report was produced.", file=sys.stderr)
         return 1
-    print(format_specialist_report(report))
+    try:
+        attributions = attribute_report_failures(report, eval_type="specialist")
+        localization = format_failure_attribution_report(attributions) if attributions else None
+        text = format_specialist_report(report)
+    except Exception:
+        print("Live specialist failure localization failed; no report was produced.", file=sys.stderr)
+        return 1
+    print(text)
+    if localization is not None:
+        print()
+        print(localization)
     return 1 if report["failed"] else 0
 
 

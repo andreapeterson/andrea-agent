@@ -14,6 +14,7 @@ from openai import AsyncOpenAI
 from app.agents.prompt_context import PromptContext
 from app.agents.prompt_renderer import PromptRenderer
 from app.agents.router_agent import OpenAIRouter
+from evals.failure_attribution import attribute_report_failures, format_failure_attribution_report
 from evals.router_eval import RouterEvalCase, format_router_report, load_router_cases, run_router_evaluation
 
 
@@ -70,7 +71,17 @@ def main(argv: Sequence[str] | None = None) -> int:
         # Exception chains can contain credentials, prompts, or raw upstream responses.
         print("Live Router evaluation failed; no report was produced.", file=sys.stderr)
         return 1
-    print(format_router_report(report))
+    try:
+        attributions = attribute_report_failures(report, eval_type="router")
+        localization = format_failure_attribution_report(attributions) if attributions else None
+        text = format_router_report(report)
+    except Exception:
+        print("Live Router failure localization failed; no report was produced.", file=sys.stderr)
+        return 1
+    print(text)
+    if localization is not None:
+        print()
+        print(localization)
     return 1 if report["failed"] else 0
 
 

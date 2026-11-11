@@ -779,6 +779,24 @@ def test_cli_scored_failure_returns_one_without_rewriting_model_behavior(monkeyp
     assert 'tool_sequence: expected [["search_policy"]], received [[]]' in output.out
 
 
+def test_phase_and_booking_failures_localize_without_additional_model_requests(monkeypatch, capsys, configured_env):
+    client, _ = install_fake_client(monkeypatch, 2)
+    # The final turn speaks instead of requesting booking, leaving real state at confirmation.
+    client.responses.outputs[-2:] = [speech()]
+    assert live_conversation_eval.main(["--confirm-live", "--case-id", "verified_routine_booking"]) == 1
+    assert len(client.responses.parse_calls) == 5
+    assert len(client.responses.create_calls) == 9
+    output = capsys.readouterr()
+    assert 'final_phase: expected "booking_complete", received "confirming_booking"' in output.out
+    localization = output.out.split("\n\nFailure localization\n", 1)[1]
+    assert localization.splitlines() == [
+        "Total attributions: 3",
+        "orchestration: 1 (cases: verified_routine_booking)",
+        "conversation_state: 2 (cases: verified_routine_booking)",
+    ]
+    assert output.err == ""
+
+
 @pytest.mark.parametrize("stage", ["client", "router", "specialist", "controlled_integration"])
 def test_cli_safe_failures_never_print_upstream_data(monkeypatch, capsys, configured_env, stage):
     secret = "test-eval-secret-key RAW_PROMPT RAW_ARGUMENTS RAW_RESULTS UPSTREAM_EXCEPTION"

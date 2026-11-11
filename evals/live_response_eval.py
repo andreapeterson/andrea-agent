@@ -20,6 +20,7 @@ from app.agents.request_handoff_tool import REQUEST_HANDOFF_TOOL
 from app.agents.scheduling_tools import BOOK_SELECTED_APPOINTMENT_TOOL, FIND_APPOINTMENT_SLOTS_TOOL, SELECT_APPOINTMENT_SLOT_TOOL
 from app.agents.search_policy_tool import SEARCH_POLICY_TOOL
 from app.models.routing import IntakeAnswers
+from evals.failure_attribution import attribute_report_failures, format_failure_attribution_report
 from evals.response_eval import ResponseEvalCase, ResponseJudgeResult, format_response_report, load_response_cases, run_response_evaluation
 
 RESPONSE_JUDGE_INSTRUCTIONS = """Grade the final caller-facing response against every supplied criterion.
@@ -245,7 +246,17 @@ def main(argv: Sequence[str] | None = None) -> int:
     except Exception:
         print("Live response evaluation failed; no report was produced.", file=sys.stderr)
         return 1
-    print(format_response_report(report))
+    try:
+        attributions = attribute_report_failures(report, eval_type="response")
+        localization = format_failure_attribution_report(attributions) if attributions else None
+        text = format_response_report(report)
+    except Exception:
+        print("Live response failure localization failed; no report was produced.", file=sys.stderr)
+        return 1
+    print(text)
+    if localization is not None:
+        print()
+        print(localization)
     return 1 if report["failed"] else 0
 
 
