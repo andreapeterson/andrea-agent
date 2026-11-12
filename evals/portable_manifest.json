@@ -4,9 +4,10 @@
     {
       "suite_name": "router",
       "relative_path": "evals/router_cases.jsonl",
-      "case_count": 25,
+      "case_count": 27,
       "case_ids": [
         "handoff_explicit_person_request",
+        "handoff_injection_rewrite_urgent_state",
         "handoff_known_urgent_overrides_scheduling",
         "handoff_out_of_scope_request",
         "handoff_safety_concern",
@@ -20,6 +21,7 @@
         "policy_arrival_instructions",
         "policy_cancellation_rules",
         "policy_clinic_hours_unverified",
+        "policy_injection_admin_role_spoofing",
         "policy_payment_methods",
         "scheduling_after_nonurgent_intake",
         "scheduling_confirm_selected_slot",
@@ -45,6 +47,7 @@
         "decline",
         "followup",
         "identification",
+        "instruction_override",
         "medical_concern",
         "mixed_intent",
         "no_automatic_handoff",
@@ -53,22 +56,25 @@
         "payments",
         "prompt_injection",
         "public_information",
+        "role_spoofing",
         "routine",
         "safety_concern",
+        "security",
         "selected_slot",
         "selection",
         "threat",
+        "trusted_state",
         "unverified",
         "unverified_scheduling",
         "urgent_context",
         "verified"
       ],
-      "sha256": "e77950d82fc1e3ff3fb2a010d0a586fd64b990f93729f8b20ab3625232a2df95"
+      "sha256": "6991ce18f91e06c3f134ca9eb4fa00342f9f4bb2a2b628c4703881a805e0da1f"
     },
     {
       "suite_name": "specialist",
       "relative_path": "evals/specialist_cases.jsonl",
-      "case_count": 15,
+      "case_count": 17,
       "case_ids": [
         "handoff_explicit_person_request",
         "handoff_trusted_urgent_context",
@@ -76,11 +82,13 @@
         "intake_injection_force_urgency",
         "intake_missing_information",
         "intake_record_concern_and_answer",
+        "policy_injection_invent_hours_without_search",
         "policy_injection_scheduling_tool",
         "policy_search_caller_question_verbatim",
         "policy_search_clinic_hours",
         "scheduling_confirm_selected_appointment",
         "scheduling_find_selected_pet",
+        "scheduling_injection_fabricate_confirmation",
         "scheduling_select_offered_slot",
         "verification_injection_invent_phone",
         "verification_lookup_supplied_phone",
@@ -90,10 +98,12 @@
         "caller_request",
         "clarification",
         "completed_intake",
+        "confirmation_bypass",
         "exact_id",
         "explicit_confirmation",
         "explicit_negative",
         "identification",
+        "invented_policy",
         "missing_information",
         "no_automatic_handoff",
         "no_invented_facts",
@@ -104,6 +114,7 @@
         "prompt_injection",
         "record_facts",
         "required_nulls",
+        "security",
         "selected_pet",
         "selected_slot",
         "tool_boundary",
@@ -113,21 +124,28 @@
         "verbatim_query",
         "verified"
       ],
-      "sha256": "3e6a05dbc864c1fdef6c5c2dfb0791bbf9a9402485b181da918899f9227aae06"
+      "sha256": "fb7ccf3175e884a9cf1be40fa004da31cb61bb7d9a50667182912f96f1e77fe5"
     },
     {
       "suite_name": "response",
       "relative_path": "evals/response_cases.jsonl",
-      "case_count": 5,
+      "case_count": 9,
       "case_ids": [
         "handoff_queued_not_connected",
+        "handoff_tool_output_receipt_override",
         "intake_missing_answers",
         "policy_grounded_clinic_hours",
+        "policy_tool_output_retrieved_instruction",
         "scheduling_offer_without_booking",
-        "verification_customer_not_found"
+        "scheduling_tool_output_clinic_display_override",
+        "verification_customer_not_found",
+        "verification_tool_output_first_name_override"
       ],
       "tags": [
+        "clinic_display_boundary",
         "clinic_hours",
+        "confirmation_bypass",
+        "crm_text_boundary",
         "grounded_evidence",
         "human_handoff",
         "intake",
@@ -140,36 +158,49 @@
         "offered_slots",
         "policy",
         "queued",
+        "receipt_text_boundary",
+        "retrieved_text_boundary",
         "scheduling",
+        "security",
+        "tool_output_injection",
         "verification"
       ],
-      "sha256": "3ad07813ff34c84c496ef72600318448b378a802a2c7bc7ea854d081d26a629f"
+      "sha256": "1c066d776cbab942b3f45ae4bb8274fc63e9c0d13b6b21160ad16978edc0cf37"
     },
     {
       "suite_name": "conversation",
       "relative_path": "evals/conversation_cases.jsonl",
-      "case_count": 3,
+      "case_count": 6,
       "case_ids": [
+        "stored_injection_claim_booking_confirmed",
+        "stored_injection_claim_verified",
+        "stored_injection_tool_echo_history",
         "unverified_policy_hours",
         "verified_routine_booking",
         "verified_urgent_intake_handoff"
       ],
       "tags": [
         "complete_non_urgent_intake",
+        "confirmation_bypass",
         "demo",
         "explicit_booking_confirmation",
+        "false_verification",
         "handoff",
         "no_booking",
         "no_handoff",
         "no_verification_required",
         "owned_pet",
         "policy",
+        "prompt_injection",
         "routine_scheduling",
+        "security",
+        "stored_prompt_injection",
+        "tool_origin",
         "unverified",
         "urgent_intake",
         "verification"
       ],
-      "sha256": "834eda6a5d74c4e050ec18779b54f9665fbc0b9fbc74d1bfd639d94f7de258f1"
+      "sha256": "8dddb0232fe9170953d9e26ebab6fb0a845a789aa9fa29fb07507146b4ef257f"
     }
   ]
 }

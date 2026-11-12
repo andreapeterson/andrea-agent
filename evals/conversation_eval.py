@@ -51,6 +51,7 @@ class ConversationEvalCase(BaseModel):
     expected_booking_confirmed: bool = Field(strict=True)
     expected_handoff_queued: bool = Field(strict=True)
     tags: list[NonblankString] = Field(min_length=1)
+    controlled_policy_response_case_id: str | None = Field(default=None, min_length=1)
 
     @model_validator(mode="after")
     def validate_workflow(self) -> Self:

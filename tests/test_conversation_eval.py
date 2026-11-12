@@ -91,7 +91,7 @@ def write_rows(path, *rows):
 
 
 def test_three_golden_workflows_have_the_requested_structure():
-    policy, urgent, routine = load_conversation_cases()
+    policy, urgent, routine = load_conversation_cases()[:3]
 
     assert len({case.case_id for case in (policy, urgent, routine)}) == 3
     assert all(isinstance(case, ConversationEvalCase) for case in (policy, urgent, routine))
@@ -117,6 +117,29 @@ def test_three_golden_workflows_have_the_requested_structure():
     assert routine.expected_final_phase == ConversationPhase.BOOKING_COMPLETE
     assert routine.expected_verified_customer and routine.expected_booking_confirmed
     assert not routine.expected_handoff_queued
+
+
+def test_stored_injection_workflows_keep_safe_outcomes_and_reuse_the_controlled_policy_fixture():
+    stored = [case for case in load_conversation_cases() if "stored_prompt_injection" in case.tags]
+    assert len(stored) == 3
+    for case in stored:
+        assert {"security", "prompt_injection", "stored_prompt_injection"} <= set(case.tags)
+        assert not case.expected_booking_confirmed and not case.expected_handoff_queued
+        assert len(case.caller_turns) >= 2
+    verified, booking, echoed = stored
+    assert not verified.expected_verified_customer and verified.expected_tools_by_turn == [[], []]
+    assert booking.expected_final_phase == "confirming_booking"
+    assert booking.expected_tools_by_turn[-2:] == [[], []]
+    assert echoed.controlled_policy_response_case_id == "policy_tool_output_retrieved_instruction"
+    assert echoed.expected_specialists_by_turn == ["policy", "verification"]
+    assert echoed.expected_tools_by_turn == [["search_policy"], []]
+
+
+def test_controlled_policy_reference_is_optional_nonblank_eval_metadata(valid_row):
+    case = ConversationEvalCase.model_validate(valid_row)
+    assert case.controlled_policy_response_case_id is None
+    with pytest.raises(ValidationError):
+        ConversationEvalCase.model_validate({**valid_row, "controlled_policy_response_case_id": " "})
 
 
 def test_loader_skips_blank_lines_and_strips_metadata(tmp_path, valid_row):
@@ -174,6 +197,8 @@ def test_invalid_expectations_fail_pydantic_and_loader_validation(tmp_path, vali
 def test_models_require_all_fields_and_are_frozen(model, valid_row):
     payload = valid_row if model is ConversationEvalCase else observation_payload(load_conversation_cases()[0])
     for field in model.model_fields:
+        if not model.model_fields[field].is_required():
+            continue
         with pytest.raises(ValidationError, match=field):
             model.model_validate({key: value for key, value in payload.items() if key != field})
     instance = model.model_validate(payload)
@@ -223,15 +248,15 @@ async def test_perfect_injected_observations_pass_sequentially_without_productio
     report = await run_conversation_evaluation(iter(cases), run)
 
     assert observed_cases == cases == before
-    assert report["total"] == report["passed"] == 3
+    assert report["total"] == report["passed"] == 6
     assert report["failed"] == 0
     assert report["pass_rate"] == 1.0
     assert set(report["metrics"]) == set(CHECK_NAMES)
-    assert all(metric == {"passed": 3, "total": 3, "accuracy": 1.0} for metric in report["metrics"].values())
+    assert all(metric == {"passed": 6, "total": 6, "accuracy": 1.0} for metric in report["metrics"].values())
     assert [row["case_id"] for row in report["results"]] == [case.case_id for case in cases]
     assert report["failures"] == []
     assert all(all(row["checks"].values()) for row in report["results"])
-    assert "complete_case: 3/3 (100.0%)" in format_conversation_report(report)
+    assert "complete_case: 6/6 (100.0%)" in format_conversation_report(report)
     assert "Failures:\n- none" in format_conversation_report(report)
 
 

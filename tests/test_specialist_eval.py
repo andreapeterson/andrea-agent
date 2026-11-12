@@ -41,11 +41,11 @@ def matching_action(case):
     return SpecialistFirstAction(case.expected_action, case.expected_tool, deepcopy(case.expected_arguments))
 
 
-def test_all_cases_load_with_three_per_specialist_and_real_argument_schemas() -> None:
+def test_all_cases_load_with_baseline_and_security_examples_and_real_argument_schemas() -> None:
     cases = load_specialist_cases()
 
-    assert len(cases) == len({case.case_id for case in cases}) == 15
-    assert Counter(case.specialist for case in cases) == {specialist: 3 for specialist in SPECIALIST_TOOLS}
+    assert len(cases) == len({case.case_id for case in cases}) == 17
+    assert Counter(case.specialist for case in cases) == {"verification": 3, "intake": 3, "policy": 4, "scheduling": 4, "human_handoff": 3}
     assert {case.expected_tool for case in cases if case.expected_action == "tool"} == set(TOOL_ARGUMENT_MODELS)
     for case in cases:
         assert isinstance(case.context, PromptContext)
@@ -75,7 +75,7 @@ def test_dataset_preserves_required_nulls_and_guarded_handoff_examples() -> None
     assert cases["intake_injection_force_urgency"].expected_action == "speech"
     assert len([case for case in cases.values() if "prompt_injection" in case.tags]) >= 3
     for case in cases.values():
-        if case.expected_tool == "search_policy":
+        if case.expected_tool == "search_policy" and "security" not in case.tags:
             assert case.expected_arguments["query"] == case.user_message
 
 
@@ -163,14 +163,16 @@ async def test_exact_matches_pass_and_callable_is_awaited_once_per_case() -> Non
     report = await run_specialist_evaluation(iter(cases), run_case)
 
     assert run_case.await_args_list == [call(case) for case in cases]
-    assert run_case.await_count == 15
-    assert report["total"] == report["passed"] == 15
+    assert run_case.await_count == 17
+    assert report["total"] == report["passed"] == 17
     assert report["failed"] == 0
     assert report["failures"] == []
     for name, metric in report["metrics"].items():
-        total = 9 if name in {"tool_name", "arguments"} else 15
+        total = 10 if name in {"tool_name", "arguments"} else 17
         assert metric == {"passed": total, "total": total, "accuracy": 1.0}
-    assert all(summary["passed"] == 3 for summary in report["by_specialist"].values())
+    assert {name: summary["passed"] for name, summary in report["by_specialist"].items()} == {
+        "verification": 3, "intake": 3, "policy": 4, "scheduling": 4, "human_handoff": 3,
+    }
     assert format_specialist_report(report).endswith("Failures:\n- none")
     json.dumps(report)
 
@@ -187,16 +189,16 @@ async def test_action_tool_and_argument_failures_are_separate_with_correct_denom
 
     report = await run_specialist_evaluation(cases, run_case)
 
-    assert (report["total"], report["passed"], report["failed"]) == (15, 12, 3)
-    for name, passed, total in [("action", 14, 15), ("tool_name", 7, 9), ("arguments", 7, 9), ("complete_case", 12, 15)]:
+    assert (report["total"], report["passed"], report["failed"]) == (17, 14, 3)
+    for name, passed, total in [("action", 16, 17), ("tool_name", 8, 10), ("arguments", 8, 10), ("complete_case", 14, 17)]:
         assert report["metrics"][name] == {"passed": passed, "total": total, "accuracy": passed / total}
     failures = {result["case_id"]: result for result in report["failures"]}
     assert failures["policy_search_clinic_hours"]["checks"] == {"action": True, "tool_name": False, "arguments": True, "complete_case": False}
     assert failures["scheduling_confirm_selected_appointment"]["checks"] == {"action": True, "tool_name": True, "arguments": False, "complete_case": False}
     assert report["by_specialist"]["verification"]["metrics"]["action"]["accuracy"] == 2 / 3
     assert report["by_specialist"]["policy"]["metrics"]["arguments"]["accuracy"] == 1.0
-    assert report["by_specialist"]["policy"]["metrics"]["tool_name"]["accuracy"] == 0.5
-    assert report["by_specialist"]["scheduling"]["metrics"]["complete_case"]["accuracy"] == 2 / 3
+    assert report["by_specialist"]["policy"]["metrics"]["tool_name"]["accuracy"] == 2 / 3
+    assert report["by_specialist"]["scheduling"]["metrics"]["complete_case"]["accuracy"] == 3 / 4
     text = format_specialist_report(report)
     assert "verification_lookup_supplied_phone: action: expected tool, received speech" in text
     assert "policy_search_clinic_hours: tool_name: expected search_policy, received book_selected_appointment" in text
@@ -235,7 +237,7 @@ async def test_unexpected_tool_diagnostics_include_only_structured_tool_name_and
 async def test_speech_success_requires_no_assistant_wording_and_no_tool() -> None:
     cases = [case for case in load_specialist_cases() if case.expected_action == "speech"]
     report = await run_specialist_evaluation(cases, AsyncMock(return_value=SpecialistFirstAction("speech")))
-    assert report["passed"] == len(cases) == 6
+    assert report["passed"] == len(cases) == 7
     assert report["metrics"]["action"]["accuracy"] == 1.0
     assert report["metrics"]["tool_name"] == report["metrics"]["arguments"] == {"passed": 0, "total": 0, "accuracy": 0.0}
     assert all(result["checks"]["tool_name"] is result["checks"]["arguments"] is None for result in report["results"])
@@ -438,7 +440,7 @@ async def test_exact_matches_never_invoke_semantic_grading() -> None:
         cases, AsyncMock(side_effect=[matching_action(case) for case in cases]), semantic_grader=judge,
     )
 
-    assert report["passed"] == 15
+    assert report["passed"] == 17
     judge.assert_not_awaited()
 
 
@@ -576,6 +578,6 @@ async def test_no_clients_state_retrieval_or_tool_handlers_are_used(monkeypatch)
     cases = load_specialist_cases()
     report = await run_specialist_evaluation(cases, AsyncMock(side_effect=[matching_action(case) for case in cases]))
 
-    assert report["passed"] == 15
+    assert report["passed"] == 17
     for trap in traps:
         trap.assert_not_called()

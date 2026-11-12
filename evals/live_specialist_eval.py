@@ -174,6 +174,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     parser.add_argument("--model", default=os.getenv("OPENAI_SPECIALIST_MODEL") or "gpt-6-luna")
     selection = parser.add_mutually_exclusive_group(required=True)
     selection.add_argument("--case-id", action="append", help="Case to evaluate; repeat to select several")
+    selection.add_argument("--tag", help="Select every case containing this exact tag")
     selection.add_argument("--all-cases", action="store_true", help="Explicitly select the entire specialist dataset")
     args = parser.parse_args(argv)
 
@@ -191,7 +192,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     unknown_ids = requested_ids - {case.case_id for case in cases}
     if unknown_ids:
         parser.error("Unknown case IDs: " + ", ".join(sorted(unknown_ids)))
-    selected_cases = [case for case in cases if args.all_cases or case.case_id in requested_ids]
+    if args.tag is not None:
+        known_tags = {"security", "prompt_injection", "tool_output_injection"} | {tag for case in cases for tag in case.tags}
+        if args.tag not in known_tags:
+            parser.error("Unknown evaluation tag")
+        selected_cases = [case for case in cases if args.tag in case.tags]
+        if not selected_cases:
+            parser.error("No evaluation cases match the selected tag")
+    else:
+        selected_cases = [case for case in cases if args.all_cases or case.case_id in requested_ids]
 
     try:
         report = asyncio.run(_evaluate(selected_cases, api_key, args.model.strip()))

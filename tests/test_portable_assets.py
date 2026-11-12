@@ -77,7 +77,7 @@ def test_all_four_suites_use_existing_loaders_paths_sorted_metadata_and_exact_ha
     manifest = build_portable_eval_manifest()
     assert manifest.schema_version == "pawline-evals-v1"
     assert tuple(suite.suite_name for suite in manifest.suites) == ("router", "specialist", "response", "conversation")
-    assert tuple(suite.case_count for suite in manifest.suites) == (25, 15, 5, 3)
+    assert tuple(suite.case_count for suite in manifest.suites) == (27, 17, 9, 6)
     for suite, (name, field, loader_name) in zip(manifest.suites, SOURCES, strict=True):
         source = getattr(portable_assets, field).resolve()
         spies[name].assert_called_once_with(source)

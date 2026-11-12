@@ -25,6 +25,7 @@ from app.models.retrieval import PolicySearchResult
 from app.services.conversation_store import InMemoryConversationStore
 from app.services.prompt_agent_runtime import PromptAgentRuntime
 from evals.failure_attribution import attribute_report_failures, format_failure_attribution_report
+from evals.response_eval import load_response_cases
 from evals.conversation_eval import (
     ConversationEvalCase,
     ConversationRunObservation,
@@ -58,9 +59,14 @@ class DemoCRM:
 
 
 class DemoPolicyRetriever:
+    def __init__(self, evidence: list[PolicySearchResult] | None = None) -> None:
+        self._evidence = None if evidence is None else [item.model_copy(deep=True) for item in evidence]
+
     async def search(self, query: str, limit: int = 3) -> list[PolicySearchResult]:
         if not query.strip() or limit < 1:
             raise ControlledIntegrationError("Invalid demo policy search")
+        if self._evidence is not None:
+            return [item.model_copy(deep=True) for item in self._evidence[:limit]]
         if not any(word in query.casefold() for word in ("hour", "open", "close")):
             return [] #so policy agent can perform real tool calling without using embeddings or a real database
         return [PolicySearchResult(
@@ -125,6 +131,19 @@ class DemoHandoff:
         )
 
 
+def create_demo_policy_retriever(case: ConversationEvalCase) -> DemoPolicyRetriever:
+    """Reuse an explicit controlled response fixture; expected labels never configure tools."""
+    if case.controlled_policy_response_case_id is None:
+        return DemoPolicyRetriever()
+    fixture = next((row for row in load_response_cases() if row.case_id == case.controlled_policy_response_case_id), None)
+    if fixture is None or fixture.specialist != "policy" or fixture.tool_name != "search_policy":
+        raise ControlledIntegrationError("Unsupported controlled policy response fixture")
+    result = fixture.tool_result
+    if not isinstance(result, dict) or result.get("found") is not True or not isinstance(result.get("evidence"), list):
+        raise ControlledIntegrationError("Invalid controlled policy evidence")
+    return DemoPolicyRetriever([PolicySearchResult.model_validate(item) for item in result["evidence"]])
+
+
 def create_live_run_conversation(
     openai_client: AsyncOpenAI,
     router_model: str,
@@ -140,7 +159,7 @@ def create_live_run_conversation(
             events: list[WorkflowEvent] = []
             policy_agent = PolicyAgent(
                 client=openai_client, model=specialist_model, prompt_renderer=renderer,
-                search_policy_handler=create_search_policy_handler(DemoPolicyRetriever()),
+                search_policy_handler=create_search_policy_handler(create_demo_policy_retriever(case)),
             )
             runtime = PromptAgentRuntime(
                 conversation_store=store, openai_client=openai_client,

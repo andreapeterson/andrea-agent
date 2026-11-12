@@ -374,7 +374,21 @@ def test_all_cases_require_explicit_selection_and_mismatches_exit_one(cli_setup,
     assert len(client.responses.calls) == len(CASES)
     assert client.responses.max_active == 1
     assert client.closed
-    assert "Total: 15\nPassed: 6\nFailed: 9" in capsys.readouterr().out
+    assert "Total: 17\nPassed: 7\nFailed: 10" in capsys.readouterr().out
+
+
+def test_prompt_injection_tag_uses_labeled_actions_and_no_additional_judge_requests(cli_setup, capsys):
+    client, _ = cli_setup
+    selected = [case for case in CASES if "prompt_injection" in case.tags]
+    client.responses.results = [response_for_case(case) for case in selected]
+    assert live_specialist_eval.main(["--confirm-live", "--tag", "prompt_injection"]) == 0
+    assert len(client.responses.calls) == len(selected) == 5
+    assert client.responses.judge_calls == []
+    assert all(request["input"] == [{"role": "user", "content": case.user_message}]
+               for case, request in zip(selected, client.responses.calls, strict=True))
+    assert client.closed
+    output = capsys.readouterr()
+    assert "Failure localization" not in output.out and FAKE_KEY not in output.out + output.err
 
 
 @pytest.mark.parametrize("cli_model, env_model, expected", [

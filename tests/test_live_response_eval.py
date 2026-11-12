@@ -545,6 +545,77 @@ def test_failed_judgment_returns_exit_one_and_reports_failed_criteria(cli_setup,
     assert len(client.responses.calls) == len(client.responses.judge_calls) == 1
 
 
+@pytest.mark.asyncio
+@pytest.mark.parametrize("case", [case for case in CASES if "tool_output_injection" in case.tags], ids=lambda case: case.case_id)
+async def test_security_tool_output_stays_in_serialized_data_and_never_becomes_judge_instructions(case):
+    client = FakeOpenAIClient()
+    client.responses.outputs = [speech()]
+    client.responses.judgments = [judgment(case)]
+    report = await run_response_evaluation(
+        [case], live_response_eval.create_live_generate_response(client, "specialist-model", PromptRenderer()),
+        live_response_eval.create_live_grade_response(client, "judge-model"),
+    )
+    assert report["passed"] == 1  # Predetermined fake grade verifies wiring, not model robustness.
+    request, = client.responses.calls
+    completed_call, output = request["input"][1:]
+    assert completed_call["name"] == case.tool_name and output["type"] == "function_call_output"
+    assert json.loads(output["output"]) == case.tool_result
+    assert "DEMO_" in output["output"] and "DEMO_" not in request["instructions"]
+    judge, = client.responses.judge_calls
+    assert judge["instructions"] == live_response_eval.RESPONSE_JUDGE_INSTRUCTIONS
+    assert "untrusted data" in judge["instructions"]
+    assert "DEMO_" not in judge["instructions"]
+    payload = json.loads(judge["input"][0]["content"])
+    assert payload["tool_result"] == case.tool_result
+    assert payload["criteria"] == [criterion.model_dump() for criterion in case.criteria]
+    assert "DEMO_" in judge["input"][0]["content"]
+    # The autouse fixture forbids every production handler, tool loop, and integration.
+    assert client.responses.events == ["specialist", "judge"]
+    assert FAKE_KEY not in json.dumps(report)
+
+
+@pytest.mark.parametrize("tag", ["security", "tool_output_injection"])
+def test_security_tag_runs_controlled_cases_with_one_continuation_and_judge_each(cli_setup, capsys, tag):
+    client, _ = cli_setup
+    selected = [case for case in CASES if tag in case.tags]
+    client.responses.outputs = [speech() for _ in selected]
+    client.responses.judgments = [judgment(case) for case in selected]
+    assert live_response_eval.main(["--confirm-live", "--tag", tag]) == 0
+    assert len(client.responses.calls) == len(client.responses.judge_calls) == len(selected) == 4
+    assert [request["input"][1]["name"] for request in client.responses.calls] == [case.tool_name for case in selected]
+    output = capsys.readouterr()
+    assert "Failure localization" not in output.out and "DEMO_" not in output.out + output.err
+
+
+def test_injected_tool_output_cannot_switch_to_another_tool_or_run_a_handler(cli_setup, capsys):
+    client, _ = cli_setup
+    case = next(case for case in CASES if case.case_id == "policy_tool_output_retrieved_instruction")
+    client.responses.outputs = [call_response("book_selected_appointment")]
+    assert live_response_eval.main(["--confirm-live", "--case-id", case.case_id]) == 1
+    request, = client.responses.calls
+    assert request["input"][1]["name"] == "search_policy"
+    assert json.loads(request["input"][2]["output"]) == case.tool_result
+    assert client.responses.judge_calls == []
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert "requested a tool instead of returning final speech" in output.err
+    assert "DEMO_" not in output.err and FAKE_KEY not in output.err
+
+
+@pytest.mark.parametrize("stage", ["model", "judge"])
+def test_security_evaluation_errors_never_print_injection_payload_or_raw_response(cli_setup, capsys, stage):
+    client, _ = cli_setup
+    selected = [case for case in CASES if "tool_output_injection" in case.tags]
+    raw = FAKE_KEY + json.dumps(selected[0].tool_result) + "RAW_MODEL_RESPONSE"
+    client.responses.outputs = [RuntimeError(raw) if stage == "model" else speech()]
+    if stage == "judge":
+        client.responses.judgments = [RuntimeError(raw)]
+    assert live_response_eval.main(["--confirm-live", "--tag", "tool_output_injection"]) == 1
+    output = capsys.readouterr()
+    assert output.out == "" and "Live response evaluation failed" in output.err
+    assert "DEMO_" not in output.err and "RAW_MODEL_RESPONSE" not in output.err and FAKE_KEY not in output.err
+
+
 def test_api_key_in_a_structured_judge_reason_is_not_printed(cli_setup, capsys):
     client, _ = cli_setup
     client.responses.outputs = [speech()]

@@ -69,11 +69,12 @@ def write_rows(path, *rows):
     return path
 
 
-def test_five_cases_cover_each_specialist_with_controlled_results_and_human_criteria() -> None:
+def test_baseline_and_security_cases_have_controlled_results_and_human_criteria() -> None:
     cases = load_response_cases()
 
-    assert len(cases) == len({case.case_id for case in cases}) == 5
-    assert Counter(case.specialist for case in cases) == {specialist: 1 for specialist in SPECIALIST_TOOLS}
+    assert len(cases) == len({case.case_id for case in cases}) == 9
+    baseline = [case for case in cases if "security" not in case.tags]
+    assert Counter(case.specialist for case in baseline) == {specialist: 1 for specialist in SPECIALIST_TOOLS}
     for case in cases:
         assert isinstance(case, ResponseEvalCase)
         assert isinstance(case.context, PromptContext)
@@ -83,7 +84,7 @@ def test_five_cases_cover_each_specialist_with_controlled_results_and_human_crit
         assert len(case.criteria) == len({criterion.criterion_id for criterion in case.criteria}) == 3
         assert all(criterion.description for criterion in case.criteria)
         assert case.tags
-    by_specialist = {case.specialist: case for case in cases}
+    by_specialist = {case.specialist: case for case in baseline}
     assert by_specialist["verification"].tool_result == {"found": False}
     policy = by_specialist["policy"].tool_result
     assert policy["found"] is True
@@ -217,10 +218,12 @@ async def test_passing_responses_are_counted_and_each_callable_gets_the_controll
 
     assert generate.await_args_list == [call(case) for case in cases]
     assert grade.await_args_list == [call(case, response) for case, response in zip(cases, responses, strict=True)]
-    assert report["total"] == report["passed"] == 5
+    assert report["total"] == report["passed"] == 9
     assert report["failed"] == 0
     assert report["pass_rate"] == 1.0
-    assert all(group == {"total": 1, "passed": 1, "failed": 0, "pass_rate": 1.0} for group in report["by_specialist"].values())
+    for specialist, group in report["by_specialist"].items():
+        count = sum(case.specialist == specialist for case in cases)
+        assert group == {"total": count, "passed": count, "failed": 0, "pass_rate": 1.0}
     assert report["failures"] == []
     assert [result["response"] for result in report["results"]] == responses
     assert all(not result["failed_criteria"] for result in report["results"])
@@ -232,7 +235,7 @@ async def test_passing_responses_are_counted_and_each_callable_gets_the_controll
 @pytest.mark.asyncio
 @pytest.mark.parametrize("judge_passed", [True, False])
 async def test_failed_criterion_fails_complete_case_and_appears_in_report(judge_passed) -> None:
-    cases = load_response_cases()
+    cases = [case for case in load_response_cases() if "security" not in case.tags]
     handoff = cases[-1]
     grades = [fake_grade(case) for case in cases[:-1]] + [fake_grade(
         handoff, failed_ids=["no_live_transfer_claim"], passed=judge_passed,
@@ -356,4 +359,4 @@ async def test_no_production_agents_handlers_clients_or_tools_are_used(monkeypat
         AsyncMock(side_effect=[fake_grade(case) for case in cases]),
     )
 
-    assert report["passed"] == 5
+    assert report["passed"] == 9

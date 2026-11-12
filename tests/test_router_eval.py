@@ -34,12 +34,14 @@ def write_rows(path, *rows):
     return path
 
 
-def test_dataset_loads_unique_cases_with_five_per_destination() -> None:
+def test_dataset_loads_unique_cases_with_baseline_and_security_destination_coverage() -> None:
     cases = load_router_cases()
 
-    assert len(cases) == 25
-    assert len({case.case_id for case in cases}) == 25
-    assert Counter(case.expected_destination for case in cases) == {destination: 5 for destination in DESTINATIONS}
+    assert len(cases) == 27
+    assert len({case.case_id for case in cases}) == 27
+    assert Counter(case.expected_destination for case in cases) == {
+        "verification": 5, "intake": 5, "policy": 6, "scheduling": 5, "human_handoff": 6,
+    }
     for case in cases:
         assert isinstance(case.context, PromptContext)
         assert case.user_message and case.reason and case.tags
@@ -50,7 +52,7 @@ def test_dataset_has_injection_urgent_unverified_scheduling_and_ambiguous_cases(
     cases = load_router_cases()
     injections = [case for case in cases if "prompt_injection" in case.tags]
     assert len(injections) >= 3
-    assert {case.expected_destination for case in injections} == {"verification", "intake"}
+    assert {case.expected_destination for case in injections} == {"verification", "intake", "policy", "human_handoff"}
     assert any(
         case.context.routing_result is not None
         and case.context.routing_result.routing_level == "urgent"
@@ -151,9 +153,9 @@ async def test_exact_matches_pass_and_route_callable_receives_only_context_and_m
 
     report = await run_router_evaluation(iter(cases), route_case)
 
-    assert route_case.await_count == 25
+    assert route_case.await_count == 27
     assert route_case.await_args_list == [call(case.context, case.user_message) for case in cases]
-    assert report["total"] == report["passed"] == 25
+    assert report["total"] == report["passed"] == 27
     assert report["failed"] == 0
     assert report["accuracy"] == 1.0
     assert report["failures"] == []
@@ -175,15 +177,16 @@ async def test_mismatches_score_overall_and_by_expected_destination_and_format_r
 
     report = await run_router_evaluation(cases, route_case)
 
-    assert report["total"] == 25
-    assert report["passed"] == 23
+    assert report["total"] == 27
+    assert report["passed"] == 25
     assert report["failed"] == 2
-    assert report["accuracy"] == pytest.approx(0.92)
+    assert report["accuracy"] == pytest.approx(25 / 27)
     for destination, group in report["by_destination"].items():
-        expected_passed = 4 if destination in {"intake", "scheduling"} else 5
-        assert group == {"total": 5, "passed": expected_passed, "failed": 5 - expected_passed, "accuracy": expected_passed / 5}
+        total = sum(case.expected_destination == destination for case in cases)
+        expected_passed = total - (destination in {"intake", "scheduling"})
+        assert group == {"total": total, "passed": expected_passed, "failed": total - expected_passed, "accuracy": expected_passed / total}
     text = format_router_report(report)
-    assert "Total: 25\nPassed: 23\nFailed: 2\nAccuracy: 92.0%" in text
+    assert "Total: 27\nPassed: 25\nFailed: 2\nAccuracy: 92.6%" in text
     assert "intake: 4/5" in text
     assert "scheduling: 4/5" in text
     assert "- intake_followup_no: expected intake, received verification" in text
@@ -234,8 +237,8 @@ async def test_evaluation_requires_no_production_state_clients_or_external_servi
         monkeypatch.setattr(cls, "__init__", forbidden)
     cases = load_router_cases()
     report = await run_router_evaluation(cases, AsyncMock(return_value="policy"))
-    assert report["total"] == 25
-    assert report["passed"] == 5
+    assert report["total"] == 27
+    assert report["passed"] == 6
 
 
 def test_command_line_uses_an_explicitly_injected_fake_callable(monkeypatch, capsys) -> None:
@@ -247,9 +250,9 @@ def test_command_line_uses_an_explicitly_injected_fake_callable(monkeypatch, cap
 
     main()
 
-    assert route_case.await_count == 25
+    assert route_case.await_count == 27
     text = capsys.readouterr().out
-    assert "Router evaluation\nTotal: 25\nPassed: 5\nFailed: 20\nAccuracy: 20.0%" in text
+    assert "Router evaluation\nTotal: 27\nPassed: 6\nFailed: 21\nAccuracy: 22.2%" in text
 
 
 def test_command_line_requires_module_function_syntax(monkeypatch, capsys) -> None:

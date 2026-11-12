@@ -221,13 +221,26 @@ def test_selected_cases_are_sequential_and_duplicate_ids_are_evaluated_once(cli_
 def test_all_cases_runs_only_when_explicitly_selected_and_returns_one_on_mismatch(cli_setup, capsys) -> None:
     client, _ = cli_setup
     status = live_router_eval.main(["--confirm-live", "--all-cases"])
-    assert status == 1  # This fake always chooses policy: only the five policy cases pass.
-    assert len(client.responses.calls) == 25
+    assert status == 1  # This fake always chooses policy: only the six policy cases pass.
+    assert len(client.responses.calls) == 27
     assert client.responses.max_active == 1
     assert client.closed
     output = capsys.readouterr().out
-    assert "Total: 25\nPassed: 5\nFailed: 20" in output
-    assert "\n\nFailure localization\nTotal attributions: 20\nrouter_selection: 20 (cases:" in output
+    assert "Total: 27\nPassed: 6\nFailed: 21" in output
+    assert "\n\nFailure localization\nTotal attributions: 21\nrouter_selection: 21 (cases:" in output
+
+
+def test_prompt_injection_tag_runs_only_selected_cases_with_fake_router(cli_setup, capsys):
+    client, _ = cli_setup
+    cases = [case for case in load_router_cases() if "prompt_injection" in case.tags]
+    client.responses.destinations = [case.expected_destination for case in cases]
+    assert live_router_eval.main(["--confirm-live", "--tag", "prompt_injection"]) == 0
+    assert len(client.responses.calls) == len(cases) == 5
+    assert [request["input"] for request in client.responses.calls] == [case.user_message for case in cases]
+    assert all(case.user_message not in request["instructions"] for case, request in zip(cases, client.responses.calls, strict=True))
+    assert client.closed
+    output = capsys.readouterr()
+    assert "Failure localization" not in output.out and FAKE_KEY not in output.out + output.err
 
 
 @pytest.mark.parametrize("cli_model, env_model, expected", [
