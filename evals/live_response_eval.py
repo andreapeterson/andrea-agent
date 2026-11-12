@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import hashlib
 import json
 import os
 import sys
@@ -116,6 +117,12 @@ def _validate_controlled_fixture(case: ResponseEvalCase) -> None:
     _reject_credentials([case.tool_arguments, case.tool_result])
 
 
+def _controlled_call_id(case_id: str) -> str:
+    """Keep matching synthetic call IDs short and stable across Python processes."""
+    digest = hashlib.sha256(case_id.encode("utf-8")).hexdigest()[:16]
+    return f"call_response_eval_{digest}"
+
+
 def create_live_generate_response(
     openai_client: AsyncOpenAI, model: str, renderer: PromptRenderer,
 ) -> Callable[[ResponseEvalCase], Awaitable[str]]:
@@ -138,7 +145,7 @@ def create_live_generate_response(
         instructions = render(context)
         input_items = [{"role": "user", "content": case.user_message}]
         if case.tool_name is not None:
-            call_id = f"call_response_eval_{case.case_id}"
+            call_id = _controlled_call_id(case.case_id)
             input_items.extend([
                 {
                     "type": "function_call", "call_id": call_id, "name": case.tool_name,
@@ -155,8 +162,16 @@ def create_live_generate_response(
                 model=model, instructions=instructions, input=input_items,
                 tools=tools, parallel_tool_calls=False,
             )
-        except Exception:
-            raise LiveResponseEvaluationError("Specialist model request failed") from None
+        except Exception as exc:
+            status_code = getattr(exc, "status_code", None)
+            status = (
+                f", HTTP {status_code}"
+                if isinstance(status_code, int)
+                else ""
+            )
+            raise LiveResponseEvaluationError(
+                f"Specialist model request failed: {type(exc).__name__}{status}"
+            ) from None
         output = getattr(response, "output", None)
         if not isinstance(output, list):
             raise LiveResponseEvaluationError("Specialist response is missing an output list")
@@ -259,8 +274,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         attributions = attribute_report_failures(report, eval_type="response")
         localization = format_failure_attribution_report(attributions) if attributions else None
         text = format_response_report(report)
-    except Exception:
-        print("Live response failure localization failed; no report was produced.", file=sys.stderr)
+    except Exception as exc:
+        status_code = getattr(exc, "status_code", None)
+        status = (
+            f", HTTP {status_code}"
+            if isinstance(status_code, int)
+            else ""
+        )
+        print(
+            "Live response evaluation failed: "
+            f"{type(exc).__name__}{status}.",
+            file=sys.stderr,
+        )
         return 1
     print(text)
     if localization is not None:

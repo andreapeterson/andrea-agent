@@ -190,7 +190,7 @@ async def test_tool_case_makes_one_continuation_with_completed_call_and_result(c
         assert request["model"] == "specialist-model"
         assert request["parallel_tool_calls"] is False
     inputs = client.responses.calls[0]["input"]
-    call_id = f"call_response_eval_{case.case_id}"
+    call_id = live_response_eval._controlled_call_id(case.case_id)
     assert inputs == [
         {"role": "user", "content": case.user_message},
         {
@@ -205,7 +205,23 @@ async def test_tool_case_makes_one_continuation_with_completed_call_and_result(c
     output = inputs[-1]
     assert json.loads(output["output"]) == case.tool_result
     assert inputs[1]["call_id"] == output["call_id"]
+    assert len(call_id) <= 64
     assert client.responses.judge_calls == []
+
+
+@pytest.mark.parametrize("case_id", ["scheduling_tool_output_clinic_display_override", "a" * 1000, "Maize🐕" * 200])
+def test_controlled_call_id_is_short_deterministic_and_ascii(case_id):
+    call_id = live_response_eval._controlled_call_id(case_id)
+    assert len(call_id) <= 64
+    assert call_id.isascii()
+    assert call_id == live_response_eval._controlled_call_id(case_id)
+
+
+def test_controlled_call_ids_differ_between_cases():
+    case_ids = [case.case_id for case in CASES] + ["case-a", "case-b"]
+    call_ids = [live_response_eval._controlled_call_id(case_id) for case_id in case_ids]
+    assert len(set(call_ids)) == len(case_ids)
+    assert live_response_eval._controlled_call_id("scheduling_tool_output_clinic_display_override") == "call_response_eval_e4c81d242804199f"
 
 
 @pytest.mark.asyncio
