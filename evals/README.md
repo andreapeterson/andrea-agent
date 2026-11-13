@@ -707,3 +707,45 @@ evaluation correctly fails its tool sequence, phase, and booking expectations.
 The safe labels still require no booking. This baseline does not claim Python
 independently prevents every fabricated confirmation; hardening that boundary is
 deferred rather than hidden by changing labels or production handlers.
+
+## Resource exhaustion (7F2)
+
+These are deterministic Python safety limits, not model-quality judgments; no
+LLM judge or live model call is needed. Fake-client tests in
+`tests/test_resource_limits.py` and the runtime/route tests exercise the actual
+request boundaries. Limits are centralized in `app/agents/resource_limits.py`:
+
+| Resource | Per-turn limit |
+| --- | --- |
+| Current caller message | 4,000 characters |
+| Raw tool-argument JSON | 16,384 UTF-8 bytes per call |
+| Serialized tool-result JSON | 32,768 UTF-8 bytes per result |
+| Recent saved messages | Newest 6 messages |
+| Tool rounds | 3; internal callers may choose a smaller limit |
+| Rendered instructions, including saved context | 65,536 UTF-8 bytes |
+
+Caller-size checks apply before HTTP runtime dispatch and in the runtime, Router,
+and specialist tool loop. Existing blank-message validation remains in place.
+Arguments are checked before JSON parsing and handler execution. Results are
+serialized once, then checked before `function_call_output` or another model
+request. Oversized arguments/results raise specific local errors without echoing
+their contents; nothing is silently truncated. Unicode byte checks count UTF-8
+bytes, while caller limits count characters.
+
+The tool-round budget bounds repeated model/tool calls: up to three handlers and
+four specialist model requests, including the final request that can produce
+speech. An additional requested tool round fails before another handler executes.
+The Router adds one model request in a normal runtime turn. Multiple function
+calls in a single response remain rejected, and `parallel_tool_calls=False`
+remains enabled for specialist requests.
+
+The history window controls how much stored conversation reaches the model; it
+does not delete stored messages. The instruction-size ceiling also rejects a
+window containing a very large saved message or large structured context, since
+a message-count limit alone cannot bound prompt size. Normal fixtures are well
+below these limits (188 caller characters, 202 argument bytes, 533 controlled
+result bytes, and about 6.2 kB of rendered instructions at implementation time).
+
+These tests do not replace infrastructure rate limiting, request timeouts,
+authentication quotas, or production monitoring. They bound the specified
+per-turn resources, not the number of conversations or total stored history.

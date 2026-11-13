@@ -14,6 +14,13 @@ from openai import AsyncOpenAI
 
 from app.agents.policy_agent import PolicyAgent
 from app.agents.prompt_renderer import PromptRenderer
+from app.agents.resource_limits import (
+    MAX_INSTRUCTION_BYTES,
+    MAX_RECENT_MESSAGES,
+    MAX_USER_MESSAGE_CHARS,
+    CallerMessageTooLargeError,
+    InstructionsTooLargeError,
+)
 from app.agents.responses_tool_loop import AgentModelRequestError
 from app.agents.router_agent import RouteDecision, RouterRequestError
 from app.agents.router_handoff import SpecialistNotAvailableError
@@ -402,6 +409,62 @@ async def test_blank_messages_raise_value_error_without_model_calls(runtime_setu
     with pytest.raises(ValueError, match="User message cannot be blank"):
         await runtime_setup.runtime.handle_turn("unknown", message)
     assert runtime_setup.responses.parse_calls == []
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("message", [
+    "PRIVATE_CALLER_MARKER" + "x" * MAX_USER_MESSAGE_CHARS,
+    " " * MAX_USER_MESSAGE_CHARS + "Hello",
+])
+async def test_oversized_message_is_rejected_before_state_or_model_work(runtime_setup, message) -> None:
+    setup = runtime_setup
+    await setup.runtime.start_conversation("conv-budget")
+    before = setup.store.get("conv-budget").model_copy(deep=True)
+
+    with pytest.raises(CallerMessageTooLargeError) as error:
+        await setup.runtime.handle_turn("conv-budget", message)
+
+    assert "PRIVATE_CALLER_MARKER" not in str(error.value)
+    assert setup.responses.parse_calls == setup.responses.create_calls == []
+    setup.crm.find_customer_by_phone.assert_not_awaited()
+    setup.scheduler.find_slots.assert_not_awaited()
+    setup.handoff.create_handoff.assert_not_awaited()
+    assert setup.store.get("conv-budget") == before
+
+
+@pytest.mark.asyncio
+async def test_only_newest_history_enters_router_and_specialist_prompts(runtime_setup) -> None:
+    setup = runtime_setup
+    state = setup.store.create("conv-history-budget")
+    older = [ConversationMessage(role=ConversationRole.USER, content=f"OLD_EXCLUDED_{index}") for index in range(3)]
+    newest = [ConversationMessage(role=ConversationRole.ASSISTANT, content=f"RECENT_INCLUDED_{index}") for index in range(MAX_RECENT_MESSAGES)]
+    state.messages = older + newest
+    setup.store.save(state)
+
+    context = setup.runtime._build_prompt_context(state)
+    assert context.recent_messages == newest
+    await setup.runtime.handle_turn("conv-history-budget", "Hello.")
+
+    for request in [*setup.responses.parse_calls, *setup.responses.create_calls]:
+        assert all(message.content in request["instructions"] for message in newest)
+        assert all(message.content not in request["instructions"] for message in older)
+    assert setup.store.get("conv-history-budget").messages[:len(older + newest)] == older + newest
+
+
+@pytest.mark.asyncio
+async def test_oversized_saved_history_cannot_enter_a_model_request(runtime_setup) -> None:
+    setup = runtime_setup
+    state = setup.store.create("conv-large-history")
+    state.messages = [ConversationMessage(role=ConversationRole.ASSISTANT, content="PRIVATE_HISTORY_MARKER" + "x" * MAX_INSTRUCTION_BYTES)]
+    setup.store.save(state)
+    before = state.model_copy(deep=True)
+
+    with pytest.raises(InstructionsTooLargeError) as error:
+        await setup.runtime.handle_turn("conv-large-history", "Hello.")
+
+    assert "PRIVATE_HISTORY_MARKER" not in str(error.value)
+    assert setup.responses.parse_calls == setup.responses.create_calls == []
+    assert setup.store.get("conv-large-history") == before
 
 
 @pytest.mark.asyncio

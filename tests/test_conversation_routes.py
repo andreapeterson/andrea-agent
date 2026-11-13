@@ -13,6 +13,7 @@ from app import dependencies
 from app.agents.lookup_customer_tool import LOOKUP_CUSTOMER_TOOL
 from app.agents.policy_agent import PolicyAgent
 from app.agents.prompt_renderer import PromptRenderingError
+from app.agents.resource_limits import MAX_USER_MESSAGE_CHARS
 from app.agents.responses_tool_loop import (
     AgentModelRequestError,
     MalformedToolCallError,
@@ -130,6 +131,31 @@ def test_invalid_message_is_rejected_before_runtime_call(client, runtime, body) 
     response = client.post("/conversations/conv-1/messages", json=body)
     assert response.status_code == 422
     assert runtime.turn_calls == []
+
+
+def test_oversized_message_is_rejected_safely_before_runtime_call(client, runtime) -> None:
+    message = "PRIVATE_CALLER_MARKER" + "x" * MAX_USER_MESSAGE_CHARS
+
+    response = client.post("/conversations/conv-1/messages", json={"message": message})
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "caller-message-too-large"}
+    assert "PRIVATE_CALLER_MARKER" not in response.text
+    assert runtime.turn_calls == []
+
+
+def test_oversized_message_is_rejected_before_runtime_dependency_initialization(client) -> None:
+    initialized = Mock(side_effect=AssertionError("Runtime initialization must not occur."))
+
+    async def unavailable_runtime():
+        initialized()
+
+    app.dependency_overrides[get_prompt_agent_runtime] = unavailable_runtime
+    response = client.post("/conversations/conv-1/messages", json={"message": "x" * (MAX_USER_MESSAGE_CHARS + 1)})
+
+    assert response.status_code == 422
+    assert response.json() == {"detail": "caller-message-too-large"}
+    initialized.assert_not_called()
 
 
 def test_unknown_conversation_returns_404(client, runtime) -> None:

@@ -15,6 +15,7 @@ from app.agents.prompt_context import PromptContext
 from app.agents.prompt_renderer import PromptRenderer
 from app.agents.record_intake_tool import create_record_intake_handler
 from app.agents.request_handoff_tool import create_request_handoff_handler
+from app.agents.resource_limits import MAX_RECENT_MESSAGES, validate_user_message_size
 from app.agents.router_agent import OpenAIRouter
 from app.agents.router_handoff import route_and_respond
 from app.agents.scheduling_agent import SchedulingAgent
@@ -95,7 +96,7 @@ class PromptAgentRuntime:
             offered_slots=state.offered_slots,
             selected_slot=selected_slot,
             booking_confirmed=state.booking_confirmation is not None,
-            recent_messages=state.messages[-6:], #last 6 messages for context
+            recent_messages=state.messages[-MAX_RECENT_MESSAGES:],
         ).model_copy(deep=True) #create a deep copy to prevent accidental mutation of the original state, describes state before the turn, so that the model can make decisions based on the state before the turn
 
     async def start_conversation(self, conversation_id: str) -> AgentTurnResult:
@@ -116,6 +117,7 @@ class PromptAgentRuntime:
             raise ValueError("conversation_id must be a nonblank string.")
         if not isinstance(user_message, str) or not user_message.strip():
             raise ValueError("User message cannot be blank.")
+        validate_user_message_size(user_message)
         conversation_id = conversation_id.strip()
         user_message = user_message.strip()
 

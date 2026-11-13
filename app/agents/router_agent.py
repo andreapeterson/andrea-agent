@@ -9,6 +9,7 @@ from openai import AsyncOpenAI
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.agents.prompt_renderer import ROUTER_PROMPT_VERSION
+from app.agents.resource_limits import validate_instructions_size, validate_user_message_size
 from app.agents.workflow_observation import observe_model_request
 
 
@@ -59,6 +60,8 @@ class OpenAIRouter:
             raise RouterRequestError("Router instructions cannot be blank.")
         if not user_message or not user_message.strip():
             raise RouterRequestError("User message cannot be blank.")
+        validate_user_message_size(user_message)
+        validate_instructions_size(instructions)
 
         try:
             with observe_model_request(self._model, prompt_version=ROUTER_PROMPT_VERSION) as record_usage:

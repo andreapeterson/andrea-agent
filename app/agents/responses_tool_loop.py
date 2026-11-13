@@ -8,6 +8,14 @@ from collections.abc import Callable
 
 from openai import AsyncOpenAI
 
+from app.agents.resource_limits import (
+    MAX_TOOL_ROUNDS,
+    ToolResultTooLargeError,
+    validate_instructions_size,
+    validate_tool_arguments_size,
+    validate_tool_result_size,
+    validate_user_message_size,
+)
 from app.agents.workflow_observation import observe_model_request, observe_tool
 
 
@@ -39,15 +47,17 @@ async def run_agent_turn(
     user_message: str,
     tools: list[dict[str, object]], #describes available tools 
     tool_handlers: dict[str, Callable[[dict[str, object]], object]], #map from tool names to python functions
-    max_tool_rounds: int = 3, #one caller message can only call 3 tools max
+    max_tool_rounds: int = MAX_TOOL_ROUNDS,
 ) -> str:
     """Ask the model to answer one caller message, running approved tools as needed."""
     if not instructions or not instructions.strip():
         raise ValueError("Instructions cannot be blank.")
     if not user_message or not user_message.strip():
         raise ValueError("Caller message cannot be blank.")
-    if max_tool_rounds < 0:
-        raise ValueError("max_tool_rounds cannot be negative.")
+    validate_user_message_size(user_message)
+    validate_instructions_size(instructions)
+    if type(max_tool_rounds) is not int or not 0 <= max_tool_rounds <= MAX_TOOL_ROUNDS:
+        raise ValueError(f"max_tool_rounds must be an integer between 0 and {MAX_TOOL_ROUNDS}.")
 
     input_items: list[object] = [{"role": "user", "content": user_message}] #running history during this turn
     tool_rounds = 0
@@ -95,6 +105,7 @@ async def run_agent_turn(
         if not isinstance(raw_arguments, str):
             raise MalformedToolCallError("The function call arguments were not JSON text.")
 
+        validate_tool_arguments_size(raw_arguments)
         try:
             arguments = json.loads(raw_arguments)
         except (json.JSONDecodeError, TypeError) as exc:
@@ -116,6 +127,9 @@ async def run_agent_turn(
                 if inspect.isawaitable(tool_result):
                     tool_result = await tool_result
                 serialized_result = json.dumps(tool_result, ensure_ascii=False, allow_nan=False)
+                validate_tool_result_size(serialized_result)
+        except ToolResultTooLargeError:
+            raise
         except Exception as exc:
             raise ToolExecutionError("The approved tool failed or returned a non-JSON result.") from exc
 

@@ -4,6 +4,7 @@ from typing import Annotated
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 
 from app.agents.prompt_renderer import PromptRenderingError
+from app.agents.resource_limits import CallerMessageTooLargeError, validate_user_message_size
 from app.agents.responses_tool_loop import (
     AgentModelRequestError,
     MalformedToolCallError,
@@ -58,6 +59,15 @@ app = FastAPI(title="PawLine")
 PromptAgentRuntimeDep = Annotated[PromptAgentRuntime | None, Depends(get_prompt_agent_runtime)]
 
 
+def validate_conversation_turn(turn_request: ConversationTurnRequest) -> ConversationTurnRequest:
+    """Reject large input before resolving a runtime that may initialize RAG."""
+    try:
+        validate_user_message_size(turn_request.message)
+    except CallerMessageTooLargeError as exc:
+        raise HTTPException(status_code=422, detail="caller-message-too-large") from exc
+    return turn_request
+
+
 @app.post("/conversations", response_model=ConversationResponse, status_code=201)
 async def start_conversation_route(
     runtime: PromptAgentRuntimeDep,
@@ -76,7 +86,7 @@ async def start_conversation_route(
 @app.post("/conversations/{conversation_id}/messages", response_model=ConversationResponse)
 async def send_conversation_message(
     conversation_id: str,
-    turn_request: ConversationTurnRequest,
+    turn_request: Annotated[ConversationTurnRequest, Depends(validate_conversation_turn)],
     runtime: PromptAgentRuntimeDep,
 ) -> ConversationResponse:
     if runtime is None:
@@ -86,6 +96,8 @@ async def send_conversation_message(
         result = await runtime.handle_turn(conversation_id, turn_request.message)
     except ConversationNotFoundError as exc:
         raise HTTPException(status_code=404, detail="conversation-not-found") from exc
+    except CallerMessageTooLargeError as exc:
+        raise HTTPException(status_code=422, detail="caller-message-too-large") from exc
     except (RouterRequestError, AgentModelRequestError) as exc:
         raise HTTPException(status_code=503, detail="agent-service-unavailable") from exc
     except (RouterResponseError, MalformedToolCallError, ToolLoopLimitError, ValueError) as exc:
