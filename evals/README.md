@@ -749,3 +749,45 @@ result bytes, and about 6.2 kB of rendered instructions at implementation time).
 These tests do not replace infrastructure rate limiting, request timeouts,
 authentication quotas, or production monitoring. They bound the specified
 per-turn resources, not the number of conversations or total stored history.
+
+## CI and security gates (7F3)
+
+`.github/workflows/quality.yml` runs on pull requests, pushes to `main`, and manual
+dispatch. It tests Python 3.12, the minimum supported version declared by
+`pyproject.toml`, with uv 0.13.7 and locked development dependencies. The
+SHA-pinned actions and uv dependency cache follow the
+[official Astral workflow guidance](https://docs.astral.sh/uv/guides/integration/github/).
+After dependencies install, all three checks run even if another check fails;
+failures are not suppressed:
+
+- `uv run ruff check .` checks Python style and common code problems.
+- `uv run pytest` checks deterministic application, eval-harness, injection, and
+  resource-limit behavior using fake clients and controlled fixtures.
+- `uv run pip-audit` checks installed dependencies against known vulnerability
+  advisories. A known vulnerability fails the gate; there is no ignore list or
+  automatic dependency upgrade.
+
+`.github/workflows/codeql.yml` follows GitHub's
+[official CodeQL starter workflow](https://github.com/actions/starter-workflows/blob/main/code-scanning/codeql.yml)
+and performs Python-only static source-code security analysis on pull requests,
+pushes to `main`, manual dispatch, and weekly on Tuesdays at 06:23 UTC. It needs
+only repository read and security-event write permissions for this public
+repository; it uses no private packs. CodeQL uploads its code-scanning findings
+to GitHub, with database upload disabled. No application/evaluation artifacts or
+environment files are uploaded by either workflow.
+
+The same local checks are:
+
+```bash
+uv sync --locked
+uv run ruff check .
+uv run pytest
+uv run pip-audit
+```
+
+These tools cannot determine whether an LLM followed a malicious instruction;
+pip-audit does not test prompt injection. Live Router, specialist, response, and
+conversation evaluations remain explicit manual runs because they cost money
+and can vary between runs. Neither workflow calls OpenAI or requires OpenAI,
+CRM, scheduler, handoff, or Infisical credentials. Their console output is
+ordinary lint, test, dependency-audit, and CodeQL output.
