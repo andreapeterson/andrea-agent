@@ -925,3 +925,11 @@ conversation evaluations remain explicit manual runs because they cost money
 and can vary between runs. Neither workflow calls OpenAI or requires OpenAI,
 CRM, scheduler, handoff, or Infisical credentials. Their console output is
 ordinary lint, test, dependency-audit, and CodeQL output.
+
+Security updates are resolved by uv rather than hand-editing `uv.lock`.
+PyJWT has a direct minimum of 2.15.0 and pytest a direct minimum of 9.0.3.
+The pytest-asyncio 1.x range supports pytest 9; async fixtures explicitly use
+function-scoped loops. Existing transitive certifi and dnspython dependencies
+have security floors of 2026.10.18 and 2.9.2 in uv's `constraint-dependencies`.
+Those constraints do not add either package as a direct application dependency.
+There are no audit ignores or relaxed lint rules.

@@ -12,7 +12,12 @@ from app.agents import (
 )
 from app.models.appointment import AppointmentSlot, AppointmentType
 from app.models.conversation import ConversationMessage, ConversationRole
-from app.models.routing import IntakeAnswers, RoutingAction, RoutingDecision, RoutingLevel
+from app.models.routing import (
+    IntakeAnswers,
+    RoutingAction,
+    RoutingDecision,
+    RoutingLevel,
+)
 
 
 def make_prompt_context() -> PromptContext:

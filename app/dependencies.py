@@ -4,7 +4,7 @@ import uuid
 from pathlib import Path
 
 from fastapi import Request
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, OpenAIError
 
 from app.agents.policy_agent import PolicyAgent
 from app.agents.prompt_renderer import PromptRenderer
@@ -84,7 +84,7 @@ async def get_prompt_agent_runtime(request: Request) -> PromptAgentRuntime | Non
                 policy_agent=policy_agent,
                 idempotency_key_factory=lambda: uuid.uuid4().hex,
             )
-        except Exception:
+        except (OpenAIError, OSError, RuntimeError, TypeError, ValueError, AttributeError, KeyError):
             return None
 
         app_state.prompt_agent_runtime = runtime
@@ -162,7 +162,7 @@ async def get_policy_answer_service(request: Request) -> PolicyAnswerService | N
                 top_k=top_k,
                 minimum_similarity=minimum_similarity,
             )
-        except Exception:  # pragma: no cover - real service initialization is tested through dependency override
+        except (OpenAIError, OSError, RuntimeError, TypeError, ValueError, AttributeError, KeyError):  # pragma: no cover - real service initialization is tested through dependency override
             app_state.policy_answer_service = None
             return None
 
@@ -199,7 +199,7 @@ async def get_policy_retriever(request: Request) -> PolicyRetriever | None:
             embedding_provider = OpenAIEmbeddingProvider(client=client, model=embedding_model)
             retriever = PolicyRetriever(embedding_provider)
             await retriever.index(chunks)
-        except Exception:
+        except (OpenAIError, OSError, RuntimeError, TypeError, ValueError, AttributeError, KeyError):
             return None
 
         app_state.policy_retriever = retriever
@@ -245,7 +245,7 @@ async def get_policy_agent(request: Request) -> PolicyAgent | None:
                 prompt_renderer=PromptRenderer(),
                 search_policy_handler=search_policy_handler,
             )
-        except Exception:
+        except (OpenAIError, OSError, RuntimeError, TypeError, ValueError, AttributeError, KeyError):
             return None
 
         app_state.policy_agent = agent

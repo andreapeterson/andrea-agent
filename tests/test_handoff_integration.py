@@ -5,7 +5,8 @@ from fastapi.testclient import TestClient
 from app.dependencies import get_handoff_client
 from app.integrations.handoff_client import HandoffClient
 from app.main import app as pawline_app
-from mock_services.handoff_api import HANDOFF_STORE, app as mock_handoff_app, reset_handoff_store
+from mock_services.handoff_api import HANDOFF_STORE, reset_handoff_store
+from mock_services.handoff_api import app as mock_handoff_app
 
 TEST_SECRET = "test-handoff-secret"
 

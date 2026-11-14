@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, Mock
@@ -13,19 +13,48 @@ import pytest
 from openai import AsyncOpenAI
 from pydantic import ValidationError
 
-from app.agents import HumanHandoffAgent, IntakeAgent, OpenAIRouter, PromptContext, PromptRenderer, RouteDecision
-from app.agents.prompt_renderer import HUMAN_HANDOFF_PROMPT_VERSION, PromptRenderingError
-from app.agents.record_intake_tool import RECORD_INTAKE_TOOL, create_record_intake_handler
-from app.agents.request_handoff_tool import REQUEST_HANDOFF_TOOL, RequestHandoffArguments, create_request_handoff_handler
+from app.agents import (
+    HumanHandoffAgent,
+    IntakeAgent,
+    OpenAIRouter,
+    PromptContext,
+    PromptRenderer,
+    RouteDecision,
+)
+from app.agents.prompt_renderer import (
+    HUMAN_HANDOFF_PROMPT_VERSION,
+    PromptRenderingError,
+)
+from app.agents.record_intake_tool import (
+    RECORD_INTAKE_TOOL,
+    create_record_intake_handler,
+)
+from app.agents.request_handoff_tool import (
+    REQUEST_HANDOFF_TOOL,
+    RequestHandoffArguments,
+    create_request_handoff_handler,
+)
 from app.agents.router_handoff import SpecialistNotAvailableError, route_and_respond
-from app.integrations.handoff_client import HandoffClient, HandoffNotRequiredError, HandoffRequestError, HandoffResponseError
+from app.integrations.handoff_client import (
+    HandoffClient,
+    HandoffNotRequiredError,
+    HandoffRequestError,
+    HandoffResponseError,
+)
 from app.models.conversation import ConversationPhase
 from app.models.customer import Customer
-from app.models.handoff import HandoffCreateRequest, HandoffReason, HandoffReceipt, HandoffRequest, HandoffStatus
+from app.models.handoff import (
+    HandoffCreateRequest,
+    HandoffReason,
+    HandoffReceipt,
+    HandoffRequest,
+    HandoffStatus,
+)
 from app.models.routing import IntakeAnswers, RoutingLevel
 from app.services.conversation_store import InMemoryConversationStore
 from app.services.routing import assess_routing
-from mock_services.handoff_api import HANDOFF_STORE, app as mock_app, reset_handoff_store
+from mock_services.handoff_api import HANDOFF_STORE, reset_handoff_store
+from mock_services.handoff_api import app as mock_app
 
 
 def receipt(conversation_id: str = "conv-handoff") -> HandoffReceipt:
@@ -33,7 +62,7 @@ def receipt(conversation_id: str = "conv-handoff") -> HandoffReceipt:
         case_id="case-human-1",
         conversation_id=conversation_id,
         status=HandoffStatus.QUEUED,
-        received_at=datetime(2026, 10, 11, tzinfo=timezone.utc),
+        received_at=datetime(2026, 10, 11, tzinfo=UTC),
     )
 
 

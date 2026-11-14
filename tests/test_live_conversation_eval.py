@@ -763,14 +763,13 @@ async def test_hook_records_only_calls_accepted_for_execution_and_cleans_up_on_e
         response.output[0].arguments = "[]"
     client = FakeOpenAI([], [response])
     handler = AsyncMock()
-    with pytest.raises(error):
-        with observe_turn(events.append, "demo-rejected-tool", 1):
-            observe_specialist("verification")
-            await run_agent_turn(
-                client=client, model="model", instructions="Stable rules", user_message="caller",
-                tools=[], tool_handlers={"lookup_customer": handler},
-                max_tool_rounds=0 if invalid == "limit" else 3,
-            )
+    with pytest.raises(error), observe_turn(events.append, "demo-rejected-tool", 1):
+        observe_specialist("verification")
+        await run_agent_turn(
+            client=client, model="model", instructions="Stable rules", user_message="caller",
+            tools=[], tool_handlers={"lookup_customer": handler},
+            max_tool_rounds=0 if invalid == "limit" else 3,
+        )
     assert selected_workflow(events) == [("demo-rejected-tool", 1, "verification", None)]
     assert events[-1].event_type == WorkflowEventType.TURN_FAILED
     before = list(events)

@@ -2,20 +2,22 @@
 
 from __future__ import annotations
 
-from types import SimpleNamespace
-from typing import cast
-
 import pytest
 from pydantic import ValidationError
 
-from app.agents import PromptContext, PromptRenderer
+from app.agents import PromptContext, PromptRenderer, PromptRenderingError
 from app.agents.router_agent import (
     OpenAIRouter,
+    RouteDecision,
     RouterRequestError,
     RouterResponseError,
-    RouteDecision,
 )
-from app.models.conversation import ConversationMessage, ConversationPhase, ConversationRole, ConversationState
+from app.models.conversation import (
+    ConversationMessage,
+    ConversationPhase,
+    ConversationRole,
+    ConversationState,
+)
 from app.models.customer import Customer, Pet, PetSpecies
 from app.models.routing import IntakeAnswers
 
@@ -225,7 +227,7 @@ def test_route_decision_requires_reason_and_rejects_extra_fields() -> None:
 def test_router_prompt_rendering_fails_clearly_when_required_value_is_missing(tmp_path) -> None:
     (tmp_path / "router.md.j2").write_text("Missing: {{ required_value }}\n", encoding="utf-8")
 
-    with pytest.raises(Exception):
+    with pytest.raises(PromptRenderingError):
         PromptRenderer(template_directory=tmp_path).render_router(make_prompt_context())
 
 

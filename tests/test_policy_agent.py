@@ -13,7 +13,13 @@ from openai import AsyncOpenAI
 from pydantic import ValidationError
 
 from app import dependencies
-from app.agents import OpenAIRouter, PolicyAgent, PromptContext, PromptRenderer, RouteDecision
+from app.agents import (
+    OpenAIRouter,
+    PolicyAgent,
+    PromptContext,
+    PromptRenderer,
+    RouteDecision,
+)
 from app.agents.prompt_renderer import POLICY_PROMPT_VERSION, PromptRenderingError
 from app.agents.responses_tool_loop import ToolExecutionError
 from app.agents.router_handoff import SpecialistNotAvailableError, route_and_respond

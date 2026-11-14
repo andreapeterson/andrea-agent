@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Iterator, Mapping
-from contextlib import contextmanager
+from contextlib import contextmanager, suppress
 from contextvars import ContextVar
 from dataclasses import dataclass, replace
 from enum import Enum
@@ -74,7 +74,8 @@ def _safe_emit( #creates and sends one event
     turn = _current_turn.get()
     if turn is None:
         return
-    try:
+    # Observer delivery is deliberately best-effort; never log exception payloads.
+    with suppress(Exception):
         turn.observer(WorkflowEvent(
             conversation_id=turn.conversation_id, turn_number=turn.turn_number,
             event_type=event_type, specialist=turn.specialist, tool_name=tool_name,
@@ -82,9 +83,6 @@ def _safe_emit( #creates and sends one event
             duration_ms=duration_ms, model=model, status=status,
             input_tokens=input_tokens, output_tokens=output_tokens, total_tokens=total_tokens,
         ))
-    except Exception:
-        # Observability is secondary. Do not log the observer's exception or recurse. agent workflow more important than observability
-        pass
 
 
 @contextmanager
@@ -142,10 +140,10 @@ def observe_specialist(specialist: str, *, prompt_version: str | None = None) ->
 
 
 def _usage_field(value: object, name: str) -> object: #Get input_tokens whether usage is a dictionary or an object. Return None if it is missing or broken. parses reponse to get usage field 
-    try:
+    # Usage accessors are optional metadata and must never fail the caller turn.
+    with suppress(Exception):
         return value.get(name) if isinstance(value, Mapping) else getattr(value, name, None)
-    except Exception:
-        return None
+    return None
 
 
 def extract_token_usage(response: object) -> dict[str, int | None]:

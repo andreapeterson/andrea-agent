@@ -1,10 +1,15 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import httpx
 import jwt
 from pydantic import ValidationError
 
-from app.models.appointment import AppointmentSlot, AppointmentType, BookingConfirmation, BookingRequest
+from app.models.appointment import (
+    AppointmentSlot,
+    AppointmentType,
+    BookingConfirmation,
+    BookingRequest,
+)
 
 
 class SchedulerError(RuntimeError):
@@ -54,7 +59,7 @@ class SchedulerClient:
         self._transport = transport
 
     def _create_jwt(self) -> str:
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         payload = {
             "sub": "pawline-service", #subject of the token, identifying the service making the request
             "iss": "pawline", #issuer of the token, identifying the entity that issued the token

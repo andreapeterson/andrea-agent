@@ -157,7 +157,7 @@ def test_signature_with_wrong_secret_returns_401(client: TestClient) -> None:
 
 def test_changing_body_after_signing_returns_401(client: TestClient) -> None:
     payload = _urgent_payload()
-    raw_body, headers = _signed_request_bytes(payload)
+    _raw_body, headers = _signed_request_bytes(payload)
     tampered = b'{"conversation_id":"conv-999"}'
 
     response = client.post("/handoffs", content=tampered, headers=headers)

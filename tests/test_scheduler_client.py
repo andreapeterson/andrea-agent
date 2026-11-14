@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime
 
 import httpx
 import jwt
@@ -11,7 +11,13 @@ from app.integrations import (
     SchedulerResponseError,
     SlotNotFoundError,
 )
-from app.models.appointment import AppointmentSlot, AppointmentType, BookingConfirmation, BookingRequest, BookingStatus
+from app.models.appointment import (
+    AppointmentSlot,
+    AppointmentType,
+    BookingConfirmation,
+    BookingRequest,
+    BookingStatus,
+)
 
 TEST_SECRET = "test-scheduler-secret-at-least-32-bytes"
 
@@ -104,8 +110,8 @@ async def test_find_slots_200_returns_list_of_slots() -> None:
         AppointmentSlot(
             slot_id="slot_routine_01",
             clinic_id="clinic_01",
-            starts_at=datetime(2026, 9, 23, 10, 0, tzinfo=timezone.utc),
-            ends_at=datetime(2026, 9, 23, 10, 45, tzinfo=timezone.utc),
+            starts_at=datetime(2026, 9, 23, 10, 0, tzinfo=UTC),
+            ends_at=datetime(2026, 9, 23, 10, 45, tzinfo=UTC),
             appointment_type=AppointmentType.ROUTINE,
         )
     ]

@@ -10,7 +10,11 @@ from app.agents.prompt_context import PromptContext
 from evals.router_eval import DEFAULT_CASES_PATH as ROUTER_CASES_PATH
 from evals.router_eval import RouterEvalCase, load_router_cases
 from evals.specialist_eval import DEFAULT_CASES_PATH as SPECIALIST_CASES_PATH
-from evals.specialist_eval import SpecialistEvalCase, SpecialistFirstAction, load_specialist_cases
+from evals.specialist_eval import (
+    SpecialistEvalCase,
+    SpecialistFirstAction,
+    load_specialist_cases,
+)
 
 
 @pytest.fixture(params=[

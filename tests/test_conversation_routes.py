@@ -21,7 +21,11 @@ from app.agents.responses_tool_loop import (
     ToolLoopLimitError,
     UnknownAgentToolError,
 )
-from app.agents.router_agent import RouteDecision, RouterRequestError, RouterResponseError
+from app.agents.router_agent import (
+    RouteDecision,
+    RouterRequestError,
+    RouterResponseError,
+)
 from app.agents.router_handoff import SpecialistNotAvailableError
 from app.dependencies import get_prompt_agent_runtime
 from app.integrations import HandoffClient, LegacyCRMClient, SchedulerClient
@@ -30,7 +34,10 @@ from app.models.agent_result import AgentTurnResult
 from app.models.conversation import ConversationPhase, ConversationState
 from app.models.conversation_api import ConversationResponse
 from app.models.customer import Customer, Pet, PetSpecies
-from app.services.conversation_store import ConversationAlreadyExistsError, ConversationNotFoundError
+from app.services.conversation_store import (
+    ConversationAlreadyExistsError,
+    ConversationNotFoundError,
+)
 from app.services.prompt_agent_runtime import PromptAgentRuntime
 
 

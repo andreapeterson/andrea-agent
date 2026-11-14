@@ -19,8 +19,7 @@ from app.agents import (
     RouterRequestError,
 )
 from app.agents.lookup_customer_tool import create_lookup_customer_handler
-from app.agents.responses_tool_loop import AgentModelRequestError, ToolExecutionError
-from app.agents.router_agent import RouterResponseError
+from app.agents.responses_tool_loop import AgentModelRequestError
 from app.agents.router_handoff import SpecialistNotAvailableError, route_and_respond
 from app.agents.verification_agent import VerificationAgent
 from app.models.customer import Customer, Pet, PetSpecies

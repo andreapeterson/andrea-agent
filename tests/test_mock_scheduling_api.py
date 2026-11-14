@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import jwt
 import pytest
@@ -10,7 +10,7 @@ TEST_SECRET = "test-scheduler-secret-at-least-32-bytes"
 
 
 def _token(*, expired: bool = False, bad_signature: bool = False, wrong_issuer: bool = False, wrong_audience: bool = False, wrong_subject: bool = False) -> str:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         "iss": "pawline",
         "aud": "mock-scheduler",

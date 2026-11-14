@@ -3,7 +3,12 @@ from datetime import datetime
 import pytest
 from pydantic import ValidationError
 
-from app.models.appointment import AppointmentSlot, AppointmentType, BookingConfirmation, BookingStatus
+from app.models.appointment import (
+    AppointmentSlot,
+    AppointmentType,
+    BookingConfirmation,
+    BookingStatus,
+)
 from app.models.conversation import (
     ConversationMessage,
     ConversationPhase,
@@ -12,7 +17,12 @@ from app.models.conversation import (
 )
 from app.models.customer import Customer, Pet, PetSpecies
 from app.models.handoff import HandoffReceipt, HandoffStatus
-from app.models.routing import IntakeAnswers, RoutingAction, RoutingDecision, RoutingLevel
+from app.models.routing import (
+    IntakeAnswers,
+    RoutingAction,
+    RoutingDecision,
+    RoutingLevel,
+)
 from app.services.conversation_store import (
     ConversationAlreadyExistsError,
     ConversationNotFoundError,
@@ -207,5 +217,5 @@ def test_store_mutations_remain_isolated_between_conversations() -> None:
 
     assert not store.get("conv-001").messages
     assert store.get("conv-001").intake_answers.difficulty_breathing is None
-    assert not store.get("conv-002").messages == [ConversationMessage(role=ConversationRole.USER, content="first")]
+    assert store.get("conv-002").messages != [ConversationMessage(role=ConversationRole.USER, content="first")]
     assert store.get("conv-002").intake_answers.collapsed_or_unresponsive is None

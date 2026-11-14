@@ -10,15 +10,22 @@ import sys
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, OpenAIError
 
 from app.agents.lookup_customer_tool import LOOKUP_CUSTOMER_TOOL
 from app.agents.prompt_renderer import PromptRenderer
 from app.agents.record_intake_tool import RECORD_INTAKE_TOOL
 from app.agents.request_handoff_tool import REQUEST_HANDOFF_TOOL
-from app.agents.scheduling_tools import BOOK_SELECTED_APPOINTMENT_TOOL, FIND_APPOINTMENT_SLOTS_TOOL, SELECT_APPOINTMENT_SLOT_TOOL
+from app.agents.scheduling_tools import (
+    BOOK_SELECTED_APPOINTMENT_TOOL,
+    FIND_APPOINTMENT_SLOTS_TOOL,
+    SELECT_APPOINTMENT_SLOT_TOOL,
+)
 from app.agents.search_policy_tool import SEARCH_POLICY_TOOL
-from evals.failure_attribution import attribute_report_failures, format_failure_attribution_report
+from evals.failure_attribution import (
+    attribute_report_failures,
+    format_failure_attribution_report,
+)
 from evals.specialist_eval import (
     SemanticGrade,
     SemanticGrader,
@@ -28,7 +35,6 @@ from evals.specialist_eval import (
     load_specialist_cases,
     run_specialist_evaluation,
 )
-
 
 SEMANTIC_JUDGE_INSTRUCTIONS = """You evaluate one natural-language specialist tool argument.
 Decide only whether actual_text preserves the same operational meaning as expected_text.
@@ -133,7 +139,7 @@ def create_live_run_case(
         )
         output = getattr(response, "output", None)
         if not isinstance(output, list):
-            raise ValueError("Specialist response is missing output")
+            raise TypeError("Specialist response is missing output")
         tool_calls = [item for item in output if getattr(item, "type", None) == "function_call"]
         if len(tool_calls) > 1:
             raise ValueError("Specialist response contains multiple function calls")
@@ -204,7 +210,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         report = asyncio.run(_evaluate(selected_cases, api_key, args.model.strip()))
-    except Exception:
+    except (OpenAIError, OSError, RuntimeError, TypeError, ValueError, AttributeError, KeyError):
         # Exception chains can contain credentials, prompts, or raw upstream responses.
         print("Live specialist evaluation failed; no report was produced.", file=sys.stderr)
         return 1
@@ -212,7 +218,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         attributions = attribute_report_failures(report, eval_type="specialist")
         localization = format_failure_attribution_report(attributions) if attributions else None
         text = format_specialist_report(report)
-    except Exception:
+    except (OpenAIError, OSError, RuntimeError, TypeError, ValueError, AttributeError, KeyError):
         print("Live specialist failure localization failed; no report was produced.", file=sys.stderr)
         return 1
     print(text)

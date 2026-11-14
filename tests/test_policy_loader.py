@@ -3,7 +3,12 @@ from pathlib import Path
 import pytest
 
 from app.models.policy import PolicyChunk, PolicyDocument
-from app.services.policy_loader import PolicyLoadError, chunk_policy_document, load_policy_chunks, load_policy_documents
+from app.services.policy_loader import (
+    PolicyLoadError,
+    chunk_policy_document,
+    load_policy_chunks,
+    load_policy_documents,
+)
 
 
 def test_real_policy_directory_loads_three_documents() -> None:

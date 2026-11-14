@@ -1,6 +1,7 @@
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from threading import Lock
+from typing import Annotated
 
 import jwt
 from fastapi import Depends, FastAPI, Header, HTTPException, Query, status
@@ -26,29 +27,29 @@ class BookingStore:
             "slot_same_day_01": AppointmentSlot(
                 slot_id="slot_same_day_01",
                 clinic_id="clinic_01",
-                starts_at=datetime(2026, 9, 21, 9, 0, tzinfo=timezone.utc),
-                ends_at=datetime(2026, 9, 21, 9, 30, tzinfo=timezone.utc),
+                starts_at=datetime(2026, 9, 21, 9, 0, tzinfo=UTC),
+                ends_at=datetime(2026, 9, 21, 9, 30, tzinfo=UTC),
                 appointment_type=AppointmentType.SAME_DAY,
             ),
             "slot_same_day_02": AppointmentSlot(
                 slot_id="slot_same_day_02",
                 clinic_id="clinic_02",
-                starts_at=datetime(2026, 9, 21, 13, 0, tzinfo=timezone.utc),
-                ends_at=datetime(2026, 9, 21, 13, 30, tzinfo=timezone.utc),
+                starts_at=datetime(2026, 9, 21, 13, 0, tzinfo=UTC),
+                ends_at=datetime(2026, 9, 21, 13, 30, tzinfo=UTC),
                 appointment_type=AppointmentType.SAME_DAY,
             ),
             "slot_routine_01": AppointmentSlot(
                 slot_id="slot_routine_01",
                 clinic_id="clinic_01",
-                starts_at=datetime(2026, 9, 23, 10, 0, tzinfo=timezone.utc),
-                ends_at=datetime(2026, 9, 23, 10, 45, tzinfo=timezone.utc),
+                starts_at=datetime(2026, 9, 23, 10, 0, tzinfo=UTC),
+                ends_at=datetime(2026, 9, 23, 10, 45, tzinfo=UTC),
                 appointment_type=AppointmentType.ROUTINE,
             ),
             "slot_routine_02": AppointmentSlot(
                 slot_id="slot_routine_02",
                 clinic_id="clinic_03",
-                starts_at=datetime(2026, 9, 24, 15, 0, tzinfo=timezone.utc),
-                ends_at=datetime(2026, 9, 24, 15, 45, tzinfo=timezone.utc),
+                starts_at=datetime(2026, 9, 24, 15, 0, tzinfo=UTC),
+                ends_at=datetime(2026, 9, 24, 15, 45, tzinfo=UTC),
                 appointment_type=AppointmentType.ROUTINE,
             ),
         }
@@ -106,7 +107,7 @@ def _jwt_secret() -> str:
     return os.getenv("MOCK_SCHEDULER_JWT_SECRET", TEST_SECRET)
 
 
-def _require_valid_token(credentials: HTTPAuthorizationCredentials | None = Depends(security)) -> None:
+def _require_valid_token(credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)]) -> None:
     if credentials is None or credentials.scheme.lower() != "bearer" or not credentials.credentials:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid or missing token")
 
@@ -129,9 +130,9 @@ def _require_valid_token(credentials: HTTPAuthorizationCredentials | None = Depe
 
 @app.get("/slots", response_model=list[AppointmentSlot])
 def get_slots(
-    pet_id: str = Query(..., description="Pet identifier."),
-    appointment_type: AppointmentType = Query(..., description="Appointment type."),
-    _token_ok: None = Depends(_require_valid_token),
+    pet_id: Annotated[str, Query(description="Pet identifier.")],
+    appointment_type: Annotated[AppointmentType, Query(description="Appointment type.")],
+    _token_ok: Annotated[None, Depends(_require_valid_token)],
 ) -> list[AppointmentSlot]:
     _ = pet_id #unused for now, but could be used in the future to filter slots based on pet characteristics
     return BOOKING_STORE.get_available_slots(appointment_type)
@@ -140,8 +141,8 @@ def get_slots(
 @app.post("/bookings", response_model=BookingConfirmation, status_code=status.HTTP_201_CREATED)
 def create_booking(
     request: BookingRequest,
-    idempotency_key: str = Header(..., alias="Idempotency-Key"),
-    _token_ok: None = Depends(_require_valid_token),
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key")],
+    _token_ok: Annotated[None, Depends(_require_valid_token)],
 ) -> BookingConfirmation:
     _ = idempotency_key
     return BOOKING_STORE.book(idempotency_key, request)

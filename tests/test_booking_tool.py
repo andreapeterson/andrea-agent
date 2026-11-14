@@ -28,7 +28,13 @@ from app.integrations.scheduler_client import (
 from app.models.appointment import AppointmentType, BookingConfirmation, BookingStatus
 from app.models.conversation import ConversationPhase
 from mock_services import scheduling_api
-from tests.test_scheduling_agent import FakeResponses, fake_client, output, prepared, slot
+from tests.test_scheduling_agent import (
+    FakeResponses,
+    fake_client,
+    output,
+    prepared,
+    slot,
+)
 
 
 def confirmation(slot_id: str = "slot-1", pet_id: str = "pet-1") -> BookingConfirmation:
@@ -249,7 +255,7 @@ async def test_saved_confirmation_prevents_duplicate_api_calls_even_after_reload
 ])
 async def test_booking_rechecks_trusted_state_before_generating_key_or_contacting_scheduler(mutation, status) -> None:
     client = FakeBookingScheduler()
-    state, store, _, _, book, factory = setup_booking(client)
+    state, _store, _, _, book, factory = setup_booking(client)
     if mutation == "unverified":
         state.verified_customer_id = state.verified_customer.customer_id
         state.verified_customer = None

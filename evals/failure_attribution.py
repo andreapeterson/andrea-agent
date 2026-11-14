@@ -44,7 +44,7 @@ class FailureAttribution(BaseModel):
 # small helpers validate untrusted dictionaries (even though we produced them)
 def _mapping(value: object, label: str) -> Mapping[str, Any]: #confirms dictionary-like 
     if not isinstance(value, Mapping):
-        raise ValueError(f"{label} must be a mapping")
+        raise TypeError(f"{label} must be a mapping")
     return value
 
 
@@ -82,7 +82,7 @@ def attribute_router_result(result: Mapping[str, Any]) -> tuple[FailureAttributi
     actual = row.get("actual_destination")
     # The Router scorer permits any returned string, including an empty one.
     if not isinstance(actual, str):
-        raise ValueError("actual_destination must be a string")
+        raise TypeError("actual_destination must be a string")
     if passed != (expected == actual): #reports dont contradict itself
         raise ValueError("Router passed flag disagrees with the destination comparison")
     return () if passed else (_attribution(
@@ -166,7 +166,7 @@ def attribute_report_failures(report: Mapping[str, Any], *, eval_type: EvalType)
     report = _mapping(report, "Report")
     results = report.get("results")
     if not isinstance(results, list):
-        raise ValueError("results must be a list")
+        raise TypeError("results must be a list")
     for name in ("total", "passed", "failed"):
         if type(report.get(name)) is not int or report[name] < 0:
             raise ValueError(f"{name} must be a nonnegative integer")

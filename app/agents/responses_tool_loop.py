@@ -79,7 +79,7 @@ async def run_agent_turn(
 
         output_items = getattr(response, "output", None)
         if not isinstance(output_items, list):
-            raise ValueError("The model response did not contain an output list.")
+            raise TypeError("The model response did not contain an output list.")
 
         function_calls = [item for item in output_items if getattr(item, "type", None) == "function_call"]
         if len(function_calls) > 1:

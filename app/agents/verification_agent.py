@@ -4,11 +4,12 @@ from __future__ import annotations
 
 from collections.abc import Awaitable, Callable
 
+from openai import AsyncOpenAI
+
 from app.agents.lookup_customer_tool import LOOKUP_CUSTOMER_TOOL
 from app.agents.prompt_context import PromptContext
 from app.agents.prompt_renderer import PromptRenderer
 from app.agents.responses_tool_loop import run_agent_turn
-from openai import AsyncOpenAI
 
 
 class VerificationAgent:
