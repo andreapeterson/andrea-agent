@@ -16,7 +16,6 @@ from app.models.conversation import ConversationState
 from app.services.conversation_store import InMemoryConversationStore
 from evals.router_eval import (
     DEFAULT_CASES_PATH,
-    DESTINATIONS,
     format_router_report,
     load_router_cases,
     main,

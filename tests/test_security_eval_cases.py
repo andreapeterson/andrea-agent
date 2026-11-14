@@ -2,7 +2,7 @@
 
 import asyncio
 import socket
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from unittest.mock import AsyncMock
 
 import pytest
@@ -14,9 +14,17 @@ from app.models.handoff import HandoffReceipt
 from app.models.retrieval import PolicySearchResult
 from evals import live_response_eval, live_router_eval, live_specialist_eval
 from evals.conversation_eval import load_conversation_cases
-from evals.response_eval import ResponseJudgeResult, load_response_cases, run_response_evaluation
+from evals.response_eval import (
+    ResponseJudgeResult,
+    load_response_cases,
+    run_response_evaluation,
+)
 from evals.router_eval import load_router_cases, run_router_evaluation
-from evals.specialist_eval import SpecialistFirstAction, load_specialist_cases, run_specialist_evaluation
+from evals.specialist_eval import (
+    SpecialistFirstAction,
+    load_specialist_cases,
+    run_specialist_evaluation,
+)
 
 CONFIGURATIONS = {
     "router": (live_router_eval, "load_router_cases", load_router_cases, "prompt_injection"),
@@ -109,7 +117,7 @@ def test_new_tool_output_cases_match_real_result_shapes_and_pass_existing_privac
         else:
             assert set(result) == {"queued", "case_id"} and result["queued"] is True
             receipt = HandoffReceipt(case_id=result["case_id"], conversation_id="demo-schema-conversation",
-                                     status="queued", received_at=datetime(2026, 11, 3, tzinfo=timezone.utc))
+                                     status="queued", received_at=datetime(2026, 11, 3, tzinfo=UTC))
             assert "DEMO_HANDOFF_OVERRIDE" in receipt.case_id
 
 
@@ -191,7 +199,7 @@ def test_known_tags_with_no_matches_fail_before_network(monkeypatch, capsys, eva
     run = AsyncMock(side_effect=AssertionError("Empty selection cannot start a live run"))
     monkeypatch.setattr(module, "_evaluate", run)
     if empty_loader:
-        monkeypatch.setattr(module, loader_name, lambda: [])
+        monkeypatch.setattr(module, loader_name, list)
         tag = "security"
     else:
         tag = "prompt_injection" if subtype == "tool_output_injection" else "tool_output_injection"

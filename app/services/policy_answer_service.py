@@ -11,8 +11,7 @@ from app.models.policy_answer import (
     PolicyAnswerStatus,
     PolicyCitation,
 )
-from app.models.retrieval import PolicySearchResult
-from app.services.policy_retriever import PolicyRetrievalError, PolicyRetriever
+from app.services.policy_retriever import PolicyRetriever
 
 INSUFFICIENT_CONTEXT_MESSAGE = (
     "I don’t have enough clinic policy information to answer that. "
@@ -94,7 +93,6 @@ class PolicyAnswerService:
                 "Supporting chunk IDs include results that were not in the retrieved context."
             )
 
-        citation_order = {result.chunk.chunk_id: result for result in results}
         citations: list[PolicyCitation] = []
         for result in results:
             chunk_id = result.chunk.chunk_id

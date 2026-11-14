@@ -1,13 +1,17 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
 
 from app.dependencies import get_handoff_client
-from app.integrations import HandoffNotRequiredError, HandoffRequestError, HandoffResponseError
+from app.integrations import (
+    HandoffNotRequiredError,
+    HandoffRequestError,
+    HandoffResponseError,
+)
 from app.main import app
-from app.models.handoff import HandoffCreateRequest, HandoffReceipt, HandoffRequest, HandoffStatus
-from app.models.routing import IntakeAnswers, RoutingAction, RoutingLevel
+from app.models.handoff import HandoffReceipt, HandoffRequest, HandoffStatus
+from app.models.routing import RoutingAction, RoutingLevel
 
 
 class FakeHandoffClient:
@@ -23,7 +27,7 @@ class FakeHandoffClient:
             case_id="case_abc",
             conversation_id=handoff_request.conversation_id,
             status=HandoffStatus.QUEUED,
-            received_at=datetime.now(timezone.utc),
+            received_at=datetime.now(UTC),
         )
 
 

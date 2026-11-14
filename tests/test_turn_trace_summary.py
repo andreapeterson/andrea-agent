@@ -13,7 +13,8 @@ from app.agents.turn_trace_summary import (
     format_turn_trace_summary,
     summarize_turn_trace,
 )
-from app.agents.workflow_observation import WorkflowEvent, WorkflowEventType as Kind
+from app.agents.workflow_observation import WorkflowEvent
+from app.agents.workflow_observation import WorkflowEventType as Kind
 
 
 def event(kind, **values):
@@ -44,8 +45,8 @@ def trace():
 def rates():
     # Arbitrary fixture values, not advertised prices for any OpenAI model.
     return {
-        "demo-router": ModelTokenPricing(Decimal("2"), Decimal("4")),
-        "demo-specialist": ModelTokenPricing(Decimal("1"), Decimal("3")),
+        "demo-router": ModelTokenPricing(Decimal(2), Decimal(4)),
+        "demo-specialist": ModelTokenPricing(Decimal(1), Decimal(3)),
     }
 
 
@@ -203,7 +204,7 @@ def test_unknown_pricing_or_unknown_model_returns_none(trace, rates):
     assert estimate_turn_cost(trace, rates) is None
 
 
-@pytest.mark.parametrize("rate", [Decimal("-1"), Decimal("NaN"), Decimal("Infinity"), 2.0, "2"])
+@pytest.mark.parametrize("rate", [Decimal(-1), Decimal("NaN"), Decimal("Infinity"), 2.0, "2"])
 def test_prices_require_nonnegative_finite_decimal_values(rate):
     with pytest.raises(ValueError, match="Decimal USD rates per million"):
         ModelTokenPricing(rate, Decimal(0))

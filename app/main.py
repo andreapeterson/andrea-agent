@@ -33,6 +33,7 @@ from app.integrations import (
     HandoffRequestError,
     HandoffResponseError,
     IdempotencyConflictError,
+    LegacyCRMClient,
     LegacyCRMParseError,
     LegacyCRMRequestError,
     PolicyGenerationRequestError,
@@ -121,7 +122,7 @@ async def send_conversation_message(
         raise HTTPException(status_code=422, detail="caller-message-too-large") from exc
     except (RouterRequestError, AgentModelRequestError) as exc:
         raise HTTPException(status_code=503, detail="agent-service-unavailable") from exc
-    except (RouterResponseError, MalformedToolCallError, ToolLoopLimitError, ValueError) as exc:
+    except (RouterResponseError, MalformedToolCallError, ToolLoopLimitError, TypeError, ValueError) as exc:
         # The existing specialist loop uses ValueError for missing or malformed model output.
         raise HTTPException(status_code=502, detail="invalid-agent-response") from exc
     except (UnknownAgentToolError, ToolExecutionError, SpecialistNotAvailableError) as exc:
@@ -139,8 +140,8 @@ async def health() -> dict[str, str]:
 
 @app.get("/customers/lookup", response_model=Customer)
 async def lookup_customer(
-    phone: str = Query(..., description="Customer phone number."),
-    crm_client=Depends(get_legacy_crm_client),
+    phone: Annotated[str, Query(description="Customer phone number.")],
+    crm_client: Annotated[LegacyCRMClient, Depends(get_legacy_crm_client)],
 ) -> Customer:
     try:
         customer = await crm_client.find_customer_by_phone(phone)
@@ -157,9 +158,9 @@ async def lookup_customer(
 
 @app.get("/appointments/slots", response_model=list[AppointmentSlot])
 async def list_appointment_slots(
-    pet_id: str = Query(..., description="Pet identifier."),
-    appointment_type: AppointmentType = Query(..., description="Appointment type."),
-    scheduler_client: SchedulerClient = Depends(get_scheduler_client),
+    pet_id: Annotated[str, Query(description="Pet identifier.")],
+    appointment_type: Annotated[AppointmentType, Query(description="Appointment type.")],
+    scheduler_client: Annotated[SchedulerClient, Depends(get_scheduler_client)],
 ) -> list[AppointmentSlot]:
     try:
         return await scheduler_client.find_slots(pet_id, appointment_type)
@@ -172,8 +173,8 @@ async def list_appointment_slots(
 @app.post("/appointments/bookings", response_model=BookingConfirmation, status_code=201)
 async def create_appointment_booking(
     booking_request: BookingRequest,
-    idempotency_key: str = Header(..., alias="Idempotency-Key"),
-    scheduler_client: SchedulerClient = Depends(get_scheduler_client),
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key")],
+    scheduler_client: Annotated[SchedulerClient, Depends(get_scheduler_client)],
 ) -> BookingConfirmation:
     try:
         return await scheduler_client.book_appointment(booking_request, idempotency_key)
@@ -194,7 +195,7 @@ async def create_appointment_booking(
 @app.post("/handoffs", response_model=HandoffReceipt, status_code=202)
 async def create_handoff(
     handoff_create_request: HandoffCreateRequest,
-    handoff_client: HandoffClient = Depends(get_handoff_client),
+    handoff_client: Annotated[HandoffClient, Depends(get_handoff_client)],
 ) -> HandoffReceipt:
     routing_decision = assess_routing(handoff_create_request.intake_answers)
     if routing_decision.next_action != RoutingAction.CREATE_HANDOFF:
@@ -229,7 +230,7 @@ async def create_handoff(
 @app.post("/policies/answer", response_model=PolicyAnswerResponse)
 async def answer_policy_question(
     question: PolicyQuestionRequest,
-    policy_answer_service: PolicyAnswerService | None = Depends(get_policy_answer_service),
+    policy_answer_service: Annotated[PolicyAnswerService | None, Depends(get_policy_answer_service)],
 ) -> PolicyAnswerResponse:
     if policy_answer_service is None:
         raise HTTPException(status_code=503, detail="policy-service-unavailable")

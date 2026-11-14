@@ -11,8 +11,18 @@ import pytest
 from openai import AsyncOpenAI
 from pydantic import ValidationError
 
-from app.agents import IntakeAgent, OpenAIRouter, PromptContext, PromptRenderer, RouteDecision
-from app.agents.prompt_renderer import INTAKE_PROMPT_VERSION, ROUTER_PROMPT_VERSION, PromptRenderingError
+from app.agents import (
+    IntakeAgent,
+    OpenAIRouter,
+    PromptContext,
+    PromptRenderer,
+    RouteDecision,
+)
+from app.agents.prompt_renderer import (
+    INTAKE_PROMPT_VERSION,
+    ROUTER_PROMPT_VERSION,
+    PromptRenderingError,
+)
 from app.agents.record_intake_tool import (
     RECORD_INTAKE_TOOL,
     RecordIntakeArguments,

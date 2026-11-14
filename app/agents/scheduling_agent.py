@@ -9,7 +9,11 @@ from openai import AsyncOpenAI
 from app.agents.prompt_context import PromptContext
 from app.agents.prompt_renderer import PromptRenderer
 from app.agents.responses_tool_loop import run_agent_turn
-from app.agents.scheduling_tools import BOOK_SELECTED_APPOINTMENT_TOOL, FIND_APPOINTMENT_SLOTS_TOOL, SELECT_APPOINTMENT_SLOT_TOOL
+from app.agents.scheduling_tools import (
+    BOOK_SELECTED_APPOINTMENT_TOOL,
+    FIND_APPOINTMENT_SLOTS_TOOL,
+    SELECT_APPOINTMENT_SLOT_TOOL,
+)
 
 
 class SchedulingAgent:

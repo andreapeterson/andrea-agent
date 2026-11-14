@@ -1,5 +1,10 @@
 from app.models.handoff import HandoffSummary
-from app.models.routing import IntakeAnswers, RoutingAction, RoutingDecision, RoutingLevel
+from app.models.routing import (
+    IntakeAnswers,
+    RoutingAction,
+    RoutingDecision,
+    RoutingLevel,
+)
 from app.services.handoff_summary import build_handoff_summary
 
 

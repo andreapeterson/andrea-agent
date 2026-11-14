@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, Mock
@@ -100,7 +100,7 @@ def customer() -> Customer:
 
 
 def slot() -> AppointmentSlot:
-    start = datetime(2026, 10, 20, 9, tzinfo=timezone.utc)
+    start = datetime(2026, 10, 20, 9, tzinfo=UTC)
     return AppointmentSlot(slot_id="slot-1", clinic_id="clinic-1", starts_at=start, ends_at=start + timedelta(minutes=30), appointment_type=AppointmentType.ROUTINE)
 
 
@@ -324,7 +324,7 @@ async def test_intake_and_handoff_handlers_use_same_loaded_state_and_save_update
     setup = runtime_setup
     await setup.runtime.start_conversation("conv-intake")
     setup.responses.destination = "intake"
-    setup.handoff.create_handoff.return_value = HandoffReceipt(case_id="case-1", conversation_id="conv-intake", status=HandoffStatus.QUEUED, received_at=datetime.now(timezone.utc))
+    setup.handoff.create_handoff.return_value = HandoffReceipt(case_id="case-1", conversation_id="conv-intake", status=HandoffStatus.QUEUED, received_at=datetime.now(UTC))
     updates = {"original_concern": "Trouble breathing", **{name: None for name in IntakeAnswers.model_fields}, "difficulty_breathing": True}
     setup.responses.outputs = [
         tool_call("record_intake", updates),

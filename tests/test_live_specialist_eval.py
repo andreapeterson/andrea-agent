@@ -10,18 +10,28 @@ from unittest.mock import AsyncMock, Mock
 
 import pytest
 from openai import AsyncOpenAI
+from pydantic import Field
 
 from app.agents.lookup_customer_tool import LOOKUP_CUSTOMER_TOOL
 from app.agents.prompt_context import PromptContext
 from app.agents.prompt_renderer import PromptRenderer
 from app.agents.record_intake_tool import RECORD_INTAKE_TOOL
 from app.agents.request_handoff_tool import REQUEST_HANDOFF_TOOL
-from app.agents.scheduling_tools import BOOK_SELECTED_APPOINTMENT_TOOL, FIND_APPOINTMENT_SLOTS_TOOL, SELECT_APPOINTMENT_SLOT_TOOL
+from app.agents.scheduling_tools import (
+    BOOK_SELECTED_APPOINTMENT_TOOL,
+    FIND_APPOINTMENT_SLOTS_TOOL,
+    SELECT_APPOINTMENT_SLOT_TOOL,
+)
 from app.agents.search_policy_tool import SEARCH_POLICY_TOOL
 from app.integrations import HandoffClient, LegacyCRMClient, SchedulerClient
 from app.services.policy_retriever import PolicyRetriever
 from evals import live_specialist_eval
-from evals.specialist_eval import SemanticGrade, SpecialistFirstAction, load_specialist_cases, run_specialist_evaluation
+from evals.specialist_eval import (
+    SemanticGrade,
+    SpecialistFirstAction,
+    load_specialist_cases,
+    run_specialist_evaluation,
+)
 
 SMOKE_CASE = "verification_missing_phone"
 TOOL_CASE = "verification_lookup_supplied_phone"
@@ -129,8 +139,8 @@ def rich_judge_context():
         verified_customer_id: str = "private-customer-id"
         selected_pet_id: str = "private-pet-id"
         booking_idempotency_key: str = "private-idempotency-key"
-        booking_confirmation: dict[str, str] = {"booking_id": "private-booking-id"}
-        handoff_receipt: dict[str, str] = {"case_id": "private-receipt-id"}
+        booking_confirmation: dict[str, str] = Field(default_factory=lambda: {"booking_id": "private-booking-id"})
+        handoff_receipt: dict[str, str] = Field(default_factory=lambda: {"case_id": "private-receipt-id"})
 
     original = next(case for case in CASES if case.case_id == "handoff_trusted_urgent_context")
     slots = next(case.context.offered_slots for case in CASES if case.case_id == "scheduling_select_offered_slot")
@@ -229,7 +239,8 @@ async def test_malformed_first_responses_are_rejected_without_another_call(respo
     client = FakeOpenAIClient()
     client.responses.results = [response]
     run_case = live_specialist_eval.create_live_run_case(cast(AsyncOpenAI, client), "model", PromptRenderer())
-    with pytest.raises(ValueError):
+    expected_error = TypeError if not isinstance(getattr(response, "output", None), list) else ValueError
+    with pytest.raises(expected_error):
         await run_case(CASES[0])
     assert len(client.responses.calls) == 1
 

@@ -2,12 +2,17 @@ import hashlib
 import hmac
 import os
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, HTTPException, Request, status
 
-from app.models.handoff import HandoffReason, HandoffReceipt, HandoffRequest, HandoffStatus
+from app.models.handoff import (
+    HandoffReason,
+    HandoffReceipt,
+    HandoffRequest,
+    HandoffStatus,
+)
 from app.models.routing import RoutingLevel
 from app.services.routing import assess_routing
 
@@ -80,5 +85,5 @@ async def create_handoff(
         case_id=case_id,
         conversation_id=request.conversation_id,
         status=HandoffStatus.QUEUED,
-        received_at=datetime.now(timezone.utc),
+        received_at=datetime.now(UTC),
     )

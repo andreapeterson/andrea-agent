@@ -7,7 +7,10 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
-from evals.portable_assets import build_portable_eval_manifest, format_portable_eval_manifest
+from evals.portable_assets import (
+    build_portable_eval_manifest,
+    format_portable_eval_manifest,
+)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -16,7 +19,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     args = parser.parse_args(argv)
     try:
         current = format_portable_eval_manifest(build_portable_eval_manifest())
-    except Exception:
+    except (OSError, RuntimeError, TypeError, ValueError):
         # Existing loader errors may contain controlled case text or local file paths.
         print("Unable to build the portable evaluation manifest.", file=sys.stderr)
         return 1

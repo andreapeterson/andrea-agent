@@ -19,9 +19,9 @@ from app.agents.lookup_customer_tool import (
 from app.agents.prompt_context import PromptContext
 from app.agents.prompt_renderer import PromptRenderer
 from app.agents.responses_tool_loop import ToolExecutionError, run_agent_turn
+from app.integrations.legacy_crm import LegacyCRMParseError, LegacyCRMRequestError
 from app.models.customer import Customer, Pet, PetSpecies
 from app.services.conversation_store import InMemoryConversationStore
-from app.integrations.legacy_crm import LegacyCRMParseError, LegacyCRMRequestError
 
 
 def make_customer() -> Customer:

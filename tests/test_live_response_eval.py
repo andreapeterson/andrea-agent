@@ -11,20 +11,30 @@ from unittest.mock import Mock
 
 import pytest
 from openai import AsyncOpenAI
+from pydantic import Field
 
 from app.agents.lookup_customer_tool import LOOKUP_CUSTOMER_TOOL
 from app.agents.prompt_context import PromptContext
 from app.agents.prompt_renderer import PromptRenderer
 from app.agents.record_intake_tool import RECORD_INTAKE_TOOL
 from app.agents.request_handoff_tool import REQUEST_HANDOFF_TOOL
-from app.agents.scheduling_tools import BOOK_SELECTED_APPOINTMENT_TOOL, FIND_APPOINTMENT_SLOTS_TOOL, SELECT_APPOINTMENT_SLOT_TOOL
+from app.agents.scheduling_tools import (
+    BOOK_SELECTED_APPOINTMENT_TOOL,
+    FIND_APPOINTMENT_SLOTS_TOOL,
+    SELECT_APPOINTMENT_SLOT_TOOL,
+)
 from app.agents.search_policy_tool import SEARCH_POLICY_TOOL
 from app.integrations import HandoffClient, LegacyCRMClient, SchedulerClient
 from app.models.conversation import ConversationState
 from app.services.conversation_store import InMemoryConversationStore
 from app.services.policy_retriever import PolicyRetriever
 from evals import live_response_eval
-from evals.response_eval import ResponseCriterion, ResponseJudgeResult, load_response_cases, run_response_evaluation
+from evals.response_eval import (
+    ResponseCriterion,
+    ResponseJudgeResult,
+    load_response_cases,
+    run_response_evaluation,
+)
 
 CASES = load_response_cases()
 SMOKE_CASE = "verification_customer_not_found"
@@ -364,7 +374,7 @@ def test_context_projection_excludes_private_fields_history_and_unrelated_data(s
         customer_id: str = PRIVATE
         selected_pet_id: str = PRIVATE
         booking_idempotency_key: str = PRIVATE
-        handoff_receipt: dict[str, str] = {"case_id": PRIVATE}
+        handoff_receipt: dict[str, str] = Field(default_factory=lambda: {"case_id": PRIVATE})
 
     case = next(case for case in CASES if case.specialist == specialist)
     scheduling = next(case for case in CASES if case.specialist == "scheduling")
@@ -666,3 +676,33 @@ def test_upstream_errors_never_leak_prompts_credentials_or_responses(cli_setup, 
     assert "raw-upstream-response" not in output.err
     if stage != "client_init":
         assert client.closed
+
+
+@pytest.mark.parametrize("status_code", [400, 429, None, False, "PRIVATE_STATUS"])
+def test_model_failure_keeps_only_safe_class_and_http_status_without_stringifying_errors(cli_setup, capsys, monkeypatch, status_code):
+    client, _ = cli_setup
+
+    class PrivateAPIError(RuntimeError):
+        def __str__(self):
+            raise AssertionError("An upstream exception must never be stringified.")
+
+    error = PrivateAPIError(FAKE_KEY + PRIVATE + "PRIVATE_UPSTREAM_BODY")
+    error.status_code = status_code
+    client.responses.outputs = [error]
+
+    def forbidden_stringification(self):
+        raise AssertionError("A controlled error must use explicit safe metadata.")
+
+    monkeypatch.setattr(live_response_eval.LiveResponseEvaluationError, "__str__", forbidden_stringification)
+
+    assert live_response_eval.main(["--confirm-live", "--case-id", SMOKE_CASE]) == 1
+
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert "Specialist model request failed: PrivateAPIError" in output.err
+    if type(status_code) is int:
+        assert f", HTTP {status_code}" in output.err
+    else:
+        assert "HTTP" not in output.err
+    assert FAKE_KEY not in output.err and PRIVATE not in output.err and "PRIVATE_UPSTREAM_BODY" not in output.err
+    assert client.closed

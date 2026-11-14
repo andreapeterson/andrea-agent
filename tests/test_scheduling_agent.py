@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import AsyncMock, Mock
@@ -13,7 +13,13 @@ import pytest
 from openai import AsyncOpenAI
 from pydantic import ValidationError
 
-from app.agents import OpenAIRouter, PromptContext, PromptRenderer, RouteDecision, SchedulingAgent
+from app.agents import (
+    OpenAIRouter,
+    PromptContext,
+    PromptRenderer,
+    RouteDecision,
+    SchedulingAgent,
+)
 from app.agents.prompt_renderer import SCHEDULING_PROMPT_VERSION, PromptRenderingError
 from app.agents.router_handoff import route_and_respond
 from app.agents.scheduling_tools import (
@@ -23,8 +29,17 @@ from app.agents.scheduling_tools import (
     create_find_appointment_slots_handler,
     create_select_appointment_slot_handler,
 )
-from app.integrations.scheduler_client import SchedulerClient, SchedulerRequestError, SchedulerResponseError
-from app.models.appointment import AppointmentSlot, AppointmentType, BookingConfirmation, BookingStatus
+from app.integrations.scheduler_client import (
+    SchedulerClient,
+    SchedulerRequestError,
+    SchedulerResponseError,
+)
+from app.models.appointment import (
+    AppointmentSlot,
+    AppointmentType,
+    BookingConfirmation,
+    BookingStatus,
+)
 from app.models.conversation import ConversationPhase
 from app.models.customer import Customer, Pet, PetSpecies
 from app.models.handoff import HandoffReceipt, HandoffStatus
@@ -161,7 +176,7 @@ async def test_exact_pet_id_disambiguates_duplicate_names() -> None:
 async def test_recorded_intake_blocks_search_and_selection_even_with_stale_routing(urgent: bool) -> None:
     client = FakeScheduler()
     state, _, find, select = prepared(client)
-    state.intake_answers = IntakeAnswers(difficulty_breathing=True if urgent else False)
+    state.intake_answers = IntakeAnswers(difficulty_breathing=bool(urgent))
     state.selected_pet_id = "pet-1"
     state.appointment_type = AppointmentType.ROUTINE
     state.offered_slots = [slot()]
@@ -268,7 +283,7 @@ async def test_existing_receipts_or_booking_confirmations_block_even_if_phase_is
     client = FakeScheduler()
     state, _, find, select = prepared(client)
     if complete == "handoff":
-        state.handoff_receipt = HandoffReceipt(case_id="case-1", conversation_id=state.conversation_id, status=HandoffStatus.QUEUED, received_at=datetime.now(timezone.utc))
+        state.handoff_receipt = HandoffReceipt(case_id="case-1", conversation_id=state.conversation_id, status=HandoffStatus.QUEUED, received_at=datetime.now(UTC))
     else:
         state.booking_confirmation = BookingConfirmation(booking_id="booking-1", slot_id="slot-1", pet_id="pet-1", status=BookingStatus.CONFIRMED)
     assert await find({"pet_reference": None}) == {"status": f"{complete}_complete"}

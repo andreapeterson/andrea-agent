@@ -9,7 +9,7 @@ import sys
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, OpenAIError
 
 from app.agents.decisions_router import DECISIONS_ROUTER_MODEL
 from app.agents.prompt_context import PromptContext
@@ -97,7 +97,7 @@ def main(argv: Sequence[str] | None = None) -> int:
 
     try:
         report = asyncio.run(_evaluate(selected_cases, api_key, model, args.router_backend))
-    except Exception:
+    except (OpenAIError, OSError, RuntimeError, TypeError, ValueError, AttributeError, KeyError):
         # Exception chains can contain credentials, prompts, or raw upstream responses.
         print("Live Router evaluation failed; no report was produced.", file=sys.stderr)
         return 1
@@ -105,7 +105,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         attributions = attribute_report_failures(report, eval_type="router")
         localization = format_failure_attribution_report(attributions) if attributions else None
         text = format_router_report(report)
-    except Exception:
+    except (OpenAIError, OSError, RuntimeError, TypeError, ValueError, AttributeError, KeyError):
         print("Live Router failure localization failed; no report was produced.", file=sys.stderr)
         return 1
     print(f"Router backend: {args.router_backend}; model: {model}")

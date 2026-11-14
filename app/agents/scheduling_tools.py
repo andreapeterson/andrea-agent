@@ -15,7 +15,12 @@ from app.integrations import (
     SlotNotFoundError,
     SlotUnavailableError,
 )
-from app.models.appointment import AppointmentSlot, AppointmentType, BookingConfirmation, BookingRequest
+from app.models.appointment import (
+    AppointmentSlot,
+    AppointmentType,
+    BookingConfirmation,
+    BookingRequest,
+)
 from app.models.conversation import ConversationPhase, ConversationState
 from app.models.customer import Pet
 from app.models.routing import RoutingLevel
@@ -371,9 +376,13 @@ def create_book_selected_appointment_handler(
 
 
 __all__ = [
-    "FIND_APPOINTMENT_SLOTS_TOOL", "SELECT_APPOINTMENT_SLOT_TOOL",
-    "FindAppointmentSlotsArguments", "SelectAppointmentSlotArguments",
-    "create_find_appointment_slots_handler", "create_select_appointment_slot_handler",
-    "BOOK_SELECTED_APPOINTMENT_TOOL", "BookSelectedAppointmentArguments",
+    "BOOK_SELECTED_APPOINTMENT_TOOL",
+    "FIND_APPOINTMENT_SLOTS_TOOL",
+    "SELECT_APPOINTMENT_SLOT_TOOL",
+    "BookSelectedAppointmentArguments",
+    "FindAppointmentSlotsArguments",
+    "SelectAppointmentSlotArguments",
     "create_book_selected_appointment_handler",
+    "create_find_appointment_slots_handler",
+    "create_select_appointment_slot_handler",
 ]

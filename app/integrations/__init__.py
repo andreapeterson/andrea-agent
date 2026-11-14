@@ -14,7 +14,12 @@ from .handoff_client import (
     HandoffRequestError,
     HandoffResponseError,
 )
-from .legacy_crm import LegacyCRMClient, LegacyCRMParseError, LegacyCRMRequestError, parse_customer_xml
+from .legacy_crm import (
+    LegacyCRMClient,
+    LegacyCRMParseError,
+    LegacyCRMRequestError,
+    parse_customer_xml,
+)
 from .policy_answer_generator import (
     OpenAIPolicyAnswerGenerator,
     PolicyAnswerGenerator,
@@ -26,11 +31,11 @@ from .policy_answer_generator import (
 from .scheduler_client import (
     CallerConfirmationRequiredError,
     IdempotencyConflictError,
-    SchedulingConflictError,
     SchedulerClient,
     SchedulerError,
     SchedulerRequestError,
     SchedulerResponseError,
+    SchedulingConflictError,
     SlotNotFoundError,
     SlotUnavailableError,
 )
@@ -56,11 +61,11 @@ __all__ = [
     "PolicyGenerationError",
     "PolicyGenerationRequestError",
     "PolicyGenerationResponseError",
-    "SchedulingConflictError",
     "SchedulerClient",
     "SchedulerError",
     "SchedulerRequestError",
     "SchedulerResponseError",
+    "SchedulingConflictError",
     "SlotNotFoundError",
     "SlotUnavailableError",
     "build_policy_answer_prompt",

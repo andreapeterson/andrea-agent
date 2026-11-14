@@ -7,11 +7,11 @@ import asyncio
 import os
 import sys
 from collections.abc import Awaitable, Callable, Sequence
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta, timezone
 from typing import Any
 from uuid import uuid4
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, OpenAIError
 
 from app.agents.policy_agent import PolicyAgent
 from app.agents.prompt_renderer import PromptRenderer
@@ -136,7 +136,7 @@ class DemoHandoff:
     async def create_handoff(self, request: HandoffRequest) -> HandoffReceipt:
         return HandoffReceipt(
             case_id="demo-handoff-1", conversation_id=request.conversation_id,
-            status="queued", received_at=datetime(2026, 11, 3, 12, tzinfo=timezone.utc),
+            status="queued", received_at=datetime(2026, 11, 3, 12, tzinfo=UTC),
         )
 
 
@@ -198,7 +198,7 @@ def create_live_run_conversation(
                 booking_confirmed=state.booking_confirmation is not None,
                 handoff_queued=state.handoff_receipt is not None,
             )
-        except Exception:
+        except (OpenAIError, OSError, RuntimeError, TypeError, ValueError, AttributeError, KeyError):
             raise LiveConversationEvaluationError("The controlled conversation workflow could not complete") from None
 
     return run_conversation
@@ -239,20 +239,20 @@ def main(argv: Sequence[str] | None = None) -> int:
     selected_cases = [case for case in cases if args.all_cases or case.case_id in requested_ids]
     try:
         report = asyncio.run(_evaluate(selected_cases, api_key, args.router_model.strip(), args.specialist_model.strip()))
-    except Exception:
+    except (OpenAIError, OSError, RuntimeError, TypeError, ValueError, AttributeError, KeyError):
         print("Live conversation evaluation failed; no report was produced.", file=sys.stderr)
         return 1
     try:
         attributions = attribute_report_failures(report, eval_type="conversation")
         localization = format_failure_attribution_report(attributions) if attributions else None
-    except Exception:
+    except (OpenAIError, OSError, RuntimeError, TypeError, ValueError, AttributeError, KeyError):
         print("Live conversation failure localization failed; no report was produced.", file=sys.stderr)
         return 1
     try:
         text = format_conversation_report(report)
         if api_key in text:
             raise LiveConversationEvaluationError("Unsafe evaluation report")
-    except Exception:
+    except (OpenAIError, OSError, RuntimeError, TypeError, ValueError, AttributeError, KeyError):
         print("Live conversation evaluation failed; no report was produced.", file=sys.stderr)
         return 1
     print(text)

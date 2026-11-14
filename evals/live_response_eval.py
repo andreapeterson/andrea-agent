@@ -11,18 +11,31 @@ import sys
 from collections.abc import Awaitable, Callable, Sequence
 from typing import Any
 
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, OpenAIError
 
 from app.agents.lookup_customer_tool import LOOKUP_CUSTOMER_TOOL
 from app.agents.prompt_context import PromptContext
 from app.agents.prompt_renderer import PromptRenderer
 from app.agents.record_intake_tool import RECORD_INTAKE_TOOL
 from app.agents.request_handoff_tool import REQUEST_HANDOFF_TOOL
-from app.agents.scheduling_tools import BOOK_SELECTED_APPOINTMENT_TOOL, FIND_APPOINTMENT_SLOTS_TOOL, SELECT_APPOINTMENT_SLOT_TOOL
+from app.agents.scheduling_tools import (
+    BOOK_SELECTED_APPOINTMENT_TOOL,
+    FIND_APPOINTMENT_SLOTS_TOOL,
+    SELECT_APPOINTMENT_SLOT_TOOL,
+)
 from app.agents.search_policy_tool import SEARCH_POLICY_TOOL
 from app.models.routing import IntakeAnswers
-from evals.failure_attribution import attribute_report_failures, format_failure_attribution_report
-from evals.response_eval import ResponseEvalCase, ResponseJudgeResult, format_response_report, load_response_cases, run_response_evaluation
+from evals.failure_attribution import (
+    attribute_report_failures,
+    format_failure_attribution_report,
+)
+from evals.response_eval import (
+    ResponseEvalCase,
+    ResponseJudgeResult,
+    format_response_report,
+    load_response_cases,
+    run_response_evaluation,
+)
 
 RESPONSE_JUDGE_INSTRUCTIONS = """Grade the final caller-facing response against every supplied criterion.
 Grade every criterion exactly once and return each original criterion_id unchanged.
@@ -41,6 +54,11 @@ responses, prompts, or exception details in your reason.
 
 class LiveResponseEvaluationError(ValueError):
     """A controlled response evaluation could not be completed safely."""
+
+    def __init__(self, safe_message: str) -> None:
+        # Callers supply only local messages or sanitized exception class/status.
+        super().__init__(safe_message)
+        self.safe_message = safe_message
 
 
 def _reject_credentials(value: object) -> None:
@@ -162,11 +180,11 @@ def create_live_generate_response(
                 model=model, instructions=instructions, input=input_items,
                 tools=tools, parallel_tool_calls=False,
             )
-        except Exception as exc:
+        except (OpenAIError, OSError, RuntimeError, TypeError, ValueError, AttributeError, KeyError) as exc:
             status_code = getattr(exc, "status_code", None)
             status = (
                 f", HTTP {status_code}"
-                if isinstance(status_code, int)
+                if type(status_code) is int and 100 <= status_code <= 599
                 else ""
             )
             raise LiveResponseEvaluationError(
@@ -208,7 +226,7 @@ def create_live_grade_response(
             if parsed is None:
                 raise ValueError("Missing judge output")
             return ResponseJudgeResult.model_validate(parsed)
-        except Exception:
+        except (OpenAIError, OSError, RuntimeError, TypeError, ValueError, AttributeError, KeyError):
             raise LiveResponseEvaluationError("Response judge request failed or returned invalid output") from None
 
     return grade_response
@@ -265,27 +283,21 @@ def main(argv: Sequence[str] | None = None) -> int:
         report = asyncio.run(_evaluate(selected, api_key, args.model.strip()))
     except LiveResponseEvaluationError as exc:
         # These messages are defined locally and contain no upstream exception text.
-        print(f"Live response evaluation failed: {exc}.", file=sys.stderr)
+        print(f"Live response evaluation failed: {exc.safe_message}.", file=sys.stderr)
         return 1
-    except Exception:
+    except (OpenAIError, OSError, RuntimeError, TypeError, ValueError, AttributeError, KeyError):
         print("Live response evaluation failed; no report was produced.", file=sys.stderr)
         return 1
     try:
         attributions = attribute_report_failures(report, eval_type="response")
         localization = format_failure_attribution_report(attributions) if attributions else None
+    except (AttributeError, KeyError, RuntimeError, TypeError, ValueError):
+        print("Live response failure localization failed; no report was produced.", file=sys.stderr)
+        return 1
+    try:
         text = format_response_report(report)
-    except Exception as exc:
-        status_code = getattr(exc, "status_code", None)
-        status = (
-            f", HTTP {status_code}"
-            if isinstance(status_code, int)
-            else ""
-        )
-        print(
-            "Live response evaluation failed: "
-            f"{type(exc).__name__}{status}.",
-            file=sys.stderr,
-        )
+    except (AttributeError, KeyError, RuntimeError, TypeError, ValueError):
+        print("Live response report formatting failed; no report was produced.", file=sys.stderr)
         return 1
     print(text)
     if localization is not None:

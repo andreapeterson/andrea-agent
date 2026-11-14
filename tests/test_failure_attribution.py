@@ -242,7 +242,8 @@ def test_malformed_router_reports_fail_clearly_without_echoing_payloads(change):
         row["actual_destination"] = {"private": "PRIVATE_PAYLOAD"}
     else:
         row["actual_destination"] = "policy"
-    with pytest.raises(ValueError) as caught:
+    expected_error = TypeError if change in {"missing_results", "results_not_list", "row_not_mapping", "invalid_actual_destination"} else ValueError
+    with pytest.raises(expected_error) as caught:
         attribute_report_failures(source, eval_type="router")
     assert str(caught.value)
     assert "PRIVATE" not in str(caught.value)
@@ -263,7 +264,8 @@ def test_invalid_check_reports_are_rejected(eval_type, row, change):
         row["checks"]["complete_case"] = True
     else:
         row["passed"] = True
-    with pytest.raises(ValueError):
+    expected_error = TypeError if change == "missing_checks" else ValueError
+    with pytest.raises(expected_error):
         attribute_report_failures(report(row), eval_type=eval_type)
 
 
@@ -326,10 +328,22 @@ def test_model_rejects_private_extra_fields_blank_metadata_and_unknown_literals(
 
 @pytest.mark.asyncio
 async def test_existing_four_harness_report_formats_are_supported_without_modification():
+    from evals.conversation_eval import (
+        ConversationRunObservation,
+        load_conversation_cases,
+        run_conversation_evaluation,
+    )
+    from evals.response_eval import (
+        ResponseJudgeResult,
+        load_response_cases,
+        run_response_evaluation,
+    )
     from evals.router_eval import load_router_cases, run_router_evaluation
-    from evals.specialist_eval import SpecialistFirstAction, load_specialist_cases, run_specialist_evaluation
-    from evals.response_eval import ResponseJudgeResult, load_response_cases, run_response_evaluation
-    from evals.conversation_eval import ConversationRunObservation, load_conversation_cases, run_conversation_evaluation
+    from evals.specialist_eval import (
+        SpecialistFirstAction,
+        load_specialist_cases,
+        run_specialist_evaluation,
+    )
 
     router_case = load_router_cases()[0]
     wrong_destination = "verification" if router_case.expected_destination != "verification" else "policy"

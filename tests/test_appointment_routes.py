@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import pytest
 from fastapi.testclient import TestClient
@@ -30,8 +30,8 @@ class FakeSchedulerClient:
             AppointmentSlot(
                 slot_id="slot_same_day_01",
                 clinic_id="clinic_01",
-                starts_at=datetime(2026, 9, 21, 9, 0, tzinfo=timezone.utc),
-                ends_at=datetime(2026, 9, 21, 9, 30, tzinfo=timezone.utc),
+                starts_at=datetime(2026, 9, 21, 9, 0, tzinfo=UTC),
+                ends_at=datetime(2026, 9, 21, 9, 30, tzinfo=UTC),
                 appointment_type=AppointmentType.SAME_DAY,
             )
         ]
