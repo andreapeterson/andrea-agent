@@ -23,6 +23,7 @@ from evals.failure_attribution import (
     attribute_report_failures,
     format_failure_attribution_report,
 )
+from evals.latency import summarize_latencies
 from evals.response_eval import (
     ResponseJudgeResult,
     load_response_cases,
@@ -96,7 +97,12 @@ def test_original_report_output_and_exit_code_are_preserved_with_explicit_locali
     original_text = getattr(module, formatter_name)(source)
     if eval_type == "router":
         original_text = "Router backend: responses; model: test-router-model\n" + original_text
-    evaluate = AsyncMock(return_value=source)
+    async def completed_evaluation(cases, *args):
+        if eval_type == "router":
+            args[-1].extend([10.0] * len(cases))
+        return source
+
+    evaluate = AsyncMock(side_effect=completed_evaluation)
     attribution = Mock(wraps=attribute_report_failures)
     localization_formatter = Mock(wraps=format_failure_attribution_report)
     monkeypatch.setattr(module, "_evaluate", evaluate)
@@ -112,7 +118,12 @@ def test_original_report_output_and_exit_code_are_preserved_with_explicit_locali
     output = capsys.readouterr()
     assert output.err == ""
     if passed:
-        assert output.out == original_text + "\n"
+        expected_output = original_text + "\n"
+        if eval_type == "router":
+            expected_output += "\n" + live_router_eval.format_router_latency_report(
+                summarize_latencies([10.0]), backend="responses", model="test-router-model",
+            ) + "\n"
+        assert output.out == expected_output
         localization_formatter.assert_not_called()
         assert "Failure localization" not in output.out
     else:
