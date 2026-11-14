@@ -76,7 +76,7 @@ class OpenAIEmbeddingProvider:
 
             if embeddings[index] is not None:
                 raise EmbeddingResponseError(f"Duplicate embedding returned for input {index}.")
-            embeddings[index] = list(float(value) for value in embedding)
+            embeddings[index] = [float(value) for value in embedding]
 
         if any(item is None for item in embeddings):
             missing_indices = [index for index, value in enumerate(embeddings) if value is None]

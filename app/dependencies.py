@@ -4,8 +4,16 @@ import uuid
 from pathlib import Path
 
 from fastapi import Request
-from openai import AsyncOpenAI
+from openai import AsyncOpenAI, OpenAIError
 
+from app.agents.policy_agent import PolicyAgent
+from app.agents.prompt_renderer import PromptRenderer
+from app.agents.router_factory import (
+    RouterBackend,
+    create_router,
+    validate_router_backend,
+)
+from app.agents.search_policy_tool import create_search_policy_handler
 from app.integrations import (
     HandoffClient,
     LegacyCRMClient,
@@ -13,60 +21,74 @@ from app.integrations import (
     OpenAIPolicyAnswerGenerator,
     SchedulerClient,
 )
-from app.services import AgentOrchestrator, InMemoryConversationStore, PolicyAnswerService
-from app.integrations.turn_interpreter import OpenAITurnInterpreter
+from app.services import InMemoryConversationStore, PolicyAnswerService
 from app.services.policy_loader import load_policy_chunks
 from app.services.policy_retriever import PolicyRetriever
+from app.services.prompt_agent_runtime import PromptAgentRuntime
 
 
-async def get_agent_orchestrator(request: Request) -> AgentOrchestrator | None:
+def get_router_backend() -> RouterBackend:
+    """Validate configuration before lazy initialization can hide an invalid value."""
+    return validate_router_backend(os.getenv("PAWLINE_ROUTER_BACKEND", "responses"))
+
+
+async def get_prompt_agent_runtime(request: Request) -> PromptAgentRuntime | None:
+    router_backend = get_router_backend()
+    # app.state owns the shared runtime so conversations survive across HTTP requests in this process.
     app_state = request.app.state
-    orchestrator = getattr(app_state, "agent_orchestrator", None)
-    if orchestrator is not None:
-        return orchestrator
+    runtime = getattr(app_state, "prompt_agent_runtime", None)
+    if runtime is not None:
+        return runtime
 
-    lock = getattr(app_state, "agent_orchestrator_lock", None)
+    lock = getattr(app_state, "prompt_agent_runtime_lock", None)
     if lock is None:
-        app_state.agent_orchestrator_lock = asyncio.Lock()
-        lock = app_state.agent_orchestrator_lock
+        lock = asyncio.Lock()
+        app_state.prompt_agent_runtime_lock = lock
 
     async with lock:
-        orchestrator = getattr(app_state, "agent_orchestrator", None)
-        if orchestrator is not None:
-            return orchestrator
+        runtime = getattr(app_state, "prompt_agent_runtime", None)
+        if runtime is not None:
+            return runtime
 
         api_key = os.getenv("OPENAI_API_KEY")
         if not api_key or not api_key.strip():
-            app_state.agent_orchestrator = None
             return None
 
         try:
             crm_client = get_legacy_crm_client()
             scheduler_client = get_scheduler_client()
             handoff_client = get_handoff_client()
-            policy_service = await get_policy_answer_service(request)
-            if policy_service is None:
-                app_state.agent_orchestrator = None
+            policy_agent = await get_policy_agent(request)
+            if policy_agent is None:
                 return None
 
-            orchestrator = AgentOrchestrator(
-                conversation_store=InMemoryConversationStore(),
-                turn_interpreter=OpenAITurnInterpreter(
-                    client=AsyncOpenAI(api_key=api_key),
-                    model=os.getenv("OPENAI_TURN_MODEL", "gpt-6-luna"),
+            store = getattr(app_state, "conversation_store", None)
+            if store is None:
+                store = InMemoryConversationStore()
+                app_state.conversation_store = store
+
+            # Construct one client shared by the router and runtime-configured specialists.
+            openai_client = AsyncOpenAI(api_key=api_key)
+            runtime = PromptAgentRuntime(
+                conversation_store=store,
+                openai_client=openai_client,
+                router=create_router(
+                    openai_client, backend=router_backend,
+                    model=os.getenv("OPENAI_ROUTER_MODEL", "gpt-6-luna"),
                 ),
+                specialist_model=os.getenv("OPENAI_SPECIALIST_MODEL", "gpt-6-luna"),
+                prompt_renderer=PromptRenderer(),
                 legacy_crm_client=crm_client,
                 scheduler_client=scheduler_client,
                 handoff_client=handoff_client,
-                policy_service=policy_service,
+                policy_agent=policy_agent,
                 idempotency_key_factory=lambda: uuid.uuid4().hex,
             )
-        except Exception:
-            app_state.agent_orchestrator = None
+        except (OpenAIError, OSError, RuntimeError, TypeError, ValueError, AttributeError, KeyError):
             return None
 
-        app_state.agent_orchestrator = orchestrator
-        return orchestrator
+        app_state.prompt_agent_runtime = runtime
+        return runtime
 
 
 def get_legacy_crm_client() -> LegacyCRMClient:
@@ -129,13 +151,10 @@ async def get_policy_answer_service(request: Request) -> PolicyAnswerService | N
 
         try:
             client = AsyncOpenAI(api_key=api_key)
-            embedding_model = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
             policy_model = os.getenv("OPENAI_POLICY_MODEL", "gpt-6-luna")
-            policy_directory = Path(__file__).resolve().parent.parent / "knowledge" / "clinic_policies"
-            chunks = load_policy_chunks(policy_directory)
-            embedding_provider = OpenAIEmbeddingProvider(client=client, model=embedding_model)
-            retriever = PolicyRetriever(embedding_provider)
-            await retriever.index(chunks)
+            retriever = await get_policy_retriever(request)
+            if retriever is None:
+                return None
             generator = OpenAIPolicyAnswerGenerator(client=client, model=policy_model)
             service = PolicyAnswerService(
                 retriever=retriever,
@@ -143,9 +162,91 @@ async def get_policy_answer_service(request: Request) -> PolicyAnswerService | N
                 top_k=top_k,
                 minimum_similarity=minimum_similarity,
             )
-        except Exception:  # pragma: no cover - real service initialization is tested through dependency override
+        except (OpenAIError, OSError, RuntimeError, TypeError, ValueError, AttributeError, KeyError):  # pragma: no cover - real service initialization is tested through dependency override
             app_state.policy_answer_service = None
             return None
 
         app_state.policy_answer_service = service
         return service
+
+
+async def get_policy_retriever(request: Request) -> PolicyRetriever | None:
+    """Reuse one initialized policy index for HTTP answers and specialist searches."""
+    app_state = request.app.state
+    retriever = getattr(app_state, "policy_retriever", None)
+    if retriever is not None:
+        return retriever
+
+    lock = getattr(app_state, "policy_retriever_lock", None)
+    if lock is None:
+        app_state.policy_retriever_lock = asyncio.Lock()
+        lock = app_state.policy_retriever_lock
+
+    async with lock:
+        retriever = getattr(app_state, "policy_retriever", None)
+        if retriever is not None:
+            return retriever
+
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key or not api_key.strip():
+            return None
+
+        try:
+            client = AsyncOpenAI(api_key=api_key)
+            embedding_model = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
+            policy_directory = Path(__file__).resolve().parent.parent / "knowledge" / "clinic_policies"
+            chunks = load_policy_chunks(policy_directory)
+            embedding_provider = OpenAIEmbeddingProvider(client=client, model=embedding_model)
+            retriever = PolicyRetriever(embedding_provider)
+            await retriever.index(chunks)
+        except (OpenAIError, OSError, RuntimeError, TypeError, ValueError, AttributeError, KeyError):
+            return None
+
+        app_state.policy_retriever = retriever
+        return retriever
+
+
+async def get_policy_agent(request: Request) -> PolicyAgent | None:
+    """Wire a stateless policy specialist to the application's existing retriever."""
+    app_state = request.app.state
+    agent = getattr(app_state, "policy_agent", None)
+    if agent is not None:
+        return agent
+
+    lock = getattr(app_state, "policy_agent_lock", None)
+    if lock is None:
+        app_state.policy_agent_lock = asyncio.Lock()
+        lock = app_state.policy_agent_lock
+
+    async with lock:
+        agent = getattr(app_state, "policy_agent", None)
+        if agent is not None:
+            return agent
+
+        api_key = os.getenv("OPENAI_API_KEY")
+        if not api_key or not api_key.strip():
+            return None
+
+        try:
+            top_k = int(os.getenv("POLICY_TOP_K", "3"))
+            minimum_similarity = float(os.getenv("POLICY_MIN_SIMILARITY", "0.45"))
+            retriever = await get_policy_retriever(request)
+            if retriever is None:
+                return None
+
+            search_policy_handler = create_search_policy_handler(
+                retriever,
+                top_k=top_k,
+                minimum_similarity=minimum_similarity,
+            )
+            agent = PolicyAgent(
+                client=AsyncOpenAI(api_key=api_key),
+                model=os.getenv("OPENAI_POLICY_MODEL", "gpt-6-luna"),
+                prompt_renderer=PromptRenderer(),
+                search_policy_handler=search_policy_handler,
+            )
+        except (OpenAIError, OSError, RuntimeError, TypeError, ValueError, AttributeError, KeyError):
+            return None
+
+        app_state.policy_agent = agent
+        return agent

@@ -6,7 +6,6 @@ os.environ["MOCK_CRM_API_KEY"] = "dev-crm-key"
 
 from mock_services.legacy_crm_api import app
 
-
 client = TestClient(app)
 
 

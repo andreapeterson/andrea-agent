@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import jwt
 import pytest
@@ -6,11 +6,11 @@ from fastapi.testclient import TestClient
 
 from mock_services.scheduling_api import app, reset_booking_store
 
-TEST_SECRET = "test-scheduler-secret"
+TEST_SECRET = "test-scheduler-secret-at-least-32-bytes"
 
 
 def _token(*, expired: bool = False, bad_signature: bool = False, wrong_issuer: bool = False, wrong_audience: bool = False, wrong_subject: bool = False) -> str:
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
     payload = {
         "iss": "pawline",
         "aud": "mock-scheduler",
@@ -26,7 +26,7 @@ def _token(*, expired: bool = False, bad_signature: bool = False, wrong_issuer: 
     if wrong_subject:
         payload["sub"] = "not-the-service"
 
-    signing_secret = TEST_SECRET if not bad_signature else "wrong-secret"
+    signing_secret = TEST_SECRET if not bad_signature else "wrong-scheduler-secret-at-least-32-bytes"
     return jwt.encode(payload, signing_secret, algorithm="HS256")
 
 
@@ -186,3 +186,25 @@ def test_booking_without_caller_confirmation_returns_400(monkeypatch) -> None:
 
     assert response.status_code == 400
     assert response.json()["detail"] == "caller-confirmation-required"
+
+
+def test_repeated_same_key_and_request_returns_same_booking(monkeypatch) -> None:
+    monkeypatch.setenv("MOCK_SCHEDULER_JWT_SECRET", TEST_SECRET)
+    client = TestClient(app)
+    headers = _auth_headers(_token(), "same-attempt")
+    payload = {"slot_id": "slot_routine_01", "pet_id": "pet_2001", "confirmed_by_caller": True}
+    first = client.post("/bookings", json=payload, headers=headers)
+    second = client.post("/bookings", json=payload, headers=headers)
+    assert first.status_code == second.status_code == 201
+    assert first.json() == second.json()
+
+
+def test_reusing_key_with_different_slot_is_an_idempotency_conflict(monkeypatch) -> None:
+    monkeypatch.setenv("MOCK_SCHEDULER_JWT_SECRET", TEST_SECRET)
+    client = TestClient(app)
+    headers = _auth_headers(_token(), "same-attempt")
+    payload = {"slot_id": "slot_routine_01", "pet_id": "pet_2001", "confirmed_by_caller": True}
+    assert client.post("/bookings", json=payload, headers=headers).status_code == 201
+    response = client.post("/bookings", json={**payload, "slot_id": "slot_routine_02"}, headers=headers)
+    assert response.status_code == 409
+    assert response.json()["detail"] == "idempotency-key-reused"

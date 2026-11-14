@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import math
 
-from app.integrations.embeddings import EmbeddingProvider
+from app.integrations import EmbeddingProvider
 from app.models.policy import PolicyChunk
 from app.models.retrieval import EmbeddedPolicyChunk, PolicySearchResult
 

@@ -1,10 +1,29 @@
+import uuid
+from contextlib import asynccontextmanager
+from typing import Annotated
+
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 
+from app.agents.prompt_renderer import PromptRenderingError
+from app.agents.resource_limits import (
+    CallerMessageTooLargeError,
+    validate_user_message_size,
+)
+from app.agents.responses_tool_loop import (
+    AgentModelRequestError,
+    MalformedToolCallError,
+    ToolExecutionError,
+    ToolLoopLimitError,
+    UnknownAgentToolError,
+)
+from app.agents.router_agent import RouterRequestError, RouterResponseError
+from app.agents.router_handoff import SpecialistNotAvailableError
 from app.dependencies import (
-    get_agent_orchestrator,
     get_handoff_client,
     get_legacy_crm_client,
     get_policy_answer_service,
+    get_prompt_agent_runtime,
+    get_router_backend,
     get_scheduler_client,
 )
 from app.integrations import (
@@ -14,6 +33,7 @@ from app.integrations import (
     HandoffRequestError,
     HandoffResponseError,
     IdempotencyConflictError,
+    LegacyCRMClient,
     LegacyCRMParseError,
     LegacyCRMRequestError,
     PolicyGenerationRequestError,
@@ -23,36 +43,63 @@ from app.integrations import (
     SchedulerResponseError,
     SlotNotFoundError,
     SlotUnavailableError,
-    TurnInterpretationRequestError,
-    TurnInterpretationResponseError,
 )
-from app.models.agent_result import AgentTurnResult
-from app.models.appointment import AppointmentSlot, AppointmentType, BookingConfirmation, BookingRequest
-from app.models.conversation import ConversationPhase
-from app.models.conversation_api import ConversationResponse, ConversationTurnRequest, conversation_response_from_result
+from app.models.appointment import (
+    AppointmentSlot,
+    AppointmentType,
+    BookingConfirmation,
+    BookingRequest,
+)
+from app.models.conversation_api import (
+    ConversationResponse,
+    ConversationTurnRequest,
+    conversation_response_from_result,
+)
 from app.models.customer import Customer
 from app.models.handoff import HandoffCreateRequest, HandoffReceipt, HandoffRequest
 from app.models.policy_answer import PolicyAnswerResponse, PolicyQuestionRequest
 from app.models.routing import RoutingAction
-from app.services import AgentOrchestrator, AgentStateError, AgentToolError, PolicyAnswerService
-from app.services import ConversationNotFoundError
+from app.services import (
+    ConversationNotFoundError,
+    PolicyAnswerService,
+)
+from app.services.conversation_store import ConversationAlreadyExistsError
 from app.services.handoff_summary import build_handoff_summary
 from app.services.policy_retriever import PolicyRetrievalError
+from app.services.prompt_agent_runtime import PromptAgentRuntime
 from app.services.routing import assess_routing
 
-app = FastAPI(title="PawLine")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    get_router_backend()
+    yield
+
+
+app = FastAPI(title="PawLine", lifespan=lifespan)
+
+PromptAgentRuntimeDep = Annotated[PromptAgentRuntime | None, Depends(get_prompt_agent_runtime)]
+
+
+def validate_conversation_turn(turn_request: ConversationTurnRequest) -> ConversationTurnRequest:
+    """Reject large input before resolving a runtime that may initialize RAG."""
+    try:
+        validate_user_message_size(turn_request.message)
+    except CallerMessageTooLargeError as exc:
+        raise HTTPException(status_code=422, detail="caller-message-too-large") from exc
+    return turn_request
 
 
 @app.post("/conversations", response_model=ConversationResponse, status_code=201)
 async def start_conversation_route(
-    orchestrator: AgentOrchestrator | None = Depends(get_agent_orchestrator),
+    runtime: PromptAgentRuntimeDep,
 ) -> ConversationResponse:
-    if orchestrator is None:
+    if runtime is None:
         raise HTTPException(status_code=503, detail="agent-service-unavailable")
 
     try:
-        result = await orchestrator.start_conversation("conversation-" + __import__("uuid").uuid4().hex)
-    except AgentStateError as exc:
+        result = await runtime.start_conversation("conversation-" + uuid.uuid4().hex)
+    except ConversationAlreadyExistsError as exc:
         raise HTTPException(status_code=409, detail="invalid-conversation-state") from exc
 
     return conversation_response_from_result(result)
@@ -61,22 +108,27 @@ async def start_conversation_route(
 @app.post("/conversations/{conversation_id}/messages", response_model=ConversationResponse)
 async def send_conversation_message(
     conversation_id: str,
-    turn_request: ConversationTurnRequest,
-    orchestrator: AgentOrchestrator | None = Depends(get_agent_orchestrator),
+    turn_request: Annotated[ConversationTurnRequest, Depends(validate_conversation_turn)],
+    runtime: PromptAgentRuntimeDep,
 ) -> ConversationResponse:
-    if orchestrator is None:
+    if runtime is None:
         raise HTTPException(status_code=503, detail="agent-service-unavailable")
 
     try:
-        result = await orchestrator.handle_turn(conversation_id, turn_request.message)
+        result = await runtime.handle_turn(conversation_id, turn_request.message)
     except ConversationNotFoundError as exc:
         raise HTTPException(status_code=404, detail="conversation-not-found") from exc
-    except AgentStateError as exc:
-        raise HTTPException(status_code=409, detail="invalid-conversation-state") from exc
-    except (TurnInterpretationRequestError, AgentToolError) as exc:
+    except CallerMessageTooLargeError as exc:
+        raise HTTPException(status_code=422, detail="caller-message-too-large") from exc
+    except (RouterRequestError, AgentModelRequestError) as exc:
         raise HTTPException(status_code=503, detail="agent-service-unavailable") from exc
-    except TurnInterpretationResponseError as exc:
-        raise HTTPException(status_code=502, detail="invalid-agent-understanding") from exc
+    except (RouterResponseError, MalformedToolCallError, ToolLoopLimitError, TypeError, ValueError) as exc:
+        # The existing specialist loop uses ValueError for missing or malformed model output.
+        raise HTTPException(status_code=502, detail="invalid-agent-response") from exc
+    except (UnknownAgentToolError, ToolExecutionError, SpecialistNotAvailableError) as exc:
+        raise HTTPException(status_code=503, detail="agent-tool-unavailable") from exc
+    except PromptRenderingError as exc:
+        raise HTTPException(status_code=500, detail="agent-configuration-error") from exc
 
     return conversation_response_from_result(result)
 
@@ -88,8 +140,8 @@ async def health() -> dict[str, str]:
 
 @app.get("/customers/lookup", response_model=Customer)
 async def lookup_customer(
-    phone: str = Query(..., description="Customer phone number."),
-    crm_client=Depends(get_legacy_crm_client),
+    phone: Annotated[str, Query(description="Customer phone number.")],
+    crm_client: Annotated[LegacyCRMClient, Depends(get_legacy_crm_client)],
 ) -> Customer:
     try:
         customer = await crm_client.find_customer_by_phone(phone)
@@ -106,9 +158,9 @@ async def lookup_customer(
 
 @app.get("/appointments/slots", response_model=list[AppointmentSlot])
 async def list_appointment_slots(
-    pet_id: str = Query(..., description="Pet identifier."),
-    appointment_type: AppointmentType = Query(..., description="Appointment type."),
-    scheduler_client: SchedulerClient = Depends(get_scheduler_client),
+    pet_id: Annotated[str, Query(description="Pet identifier.")],
+    appointment_type: Annotated[AppointmentType, Query(description="Appointment type.")],
+    scheduler_client: Annotated[SchedulerClient, Depends(get_scheduler_client)],
 ) -> list[AppointmentSlot]:
     try:
         return await scheduler_client.find_slots(pet_id, appointment_type)
@@ -121,8 +173,8 @@ async def list_appointment_slots(
 @app.post("/appointments/bookings", response_model=BookingConfirmation, status_code=201)
 async def create_appointment_booking(
     booking_request: BookingRequest,
-    idempotency_key: str = Header(..., alias="Idempotency-Key"),
-    scheduler_client: SchedulerClient = Depends(get_scheduler_client),
+    idempotency_key: Annotated[str, Header(alias="Idempotency-Key")],
+    scheduler_client: Annotated[SchedulerClient, Depends(get_scheduler_client)],
 ) -> BookingConfirmation:
     try:
         return await scheduler_client.book_appointment(booking_request, idempotency_key)
@@ -143,7 +195,7 @@ async def create_appointment_booking(
 @app.post("/handoffs", response_model=HandoffReceipt, status_code=202)
 async def create_handoff(
     handoff_create_request: HandoffCreateRequest,
-    handoff_client: HandoffClient = Depends(get_handoff_client),
+    handoff_client: Annotated[HandoffClient, Depends(get_handoff_client)],
 ) -> HandoffReceipt:
     routing_decision = assess_routing(handoff_create_request.intake_answers)
     if routing_decision.next_action != RoutingAction.CREATE_HANDOFF:
@@ -178,7 +230,7 @@ async def create_handoff(
 @app.post("/policies/answer", response_model=PolicyAnswerResponse)
 async def answer_policy_question(
     question: PolicyQuestionRequest,
-    policy_answer_service: PolicyAnswerService | None = Depends(get_policy_answer_service),
+    policy_answer_service: Annotated[PolicyAnswerService | None, Depends(get_policy_answer_service)],
 ) -> PolicyAnswerResponse:
     if policy_answer_service is None:
         raise HTTPException(status_code=503, detail="policy-service-unavailable")

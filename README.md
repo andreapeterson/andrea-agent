@@ -19,7 +19,7 @@ uv run pytest -q
 Terminal 1: PawLine app
 
 ```bash
-LEGACY_CRM_BASE_URL=http://127.0.0.1:8001 LEGACY_CRM_API_KEY=dev-crm-key SCHEDULER_BASE_URL=http://127.0.0.1:8002 SCHEDULER_JWT_SECRET=dev-scheduler-secret HANDOFF_BASE_URL=http://127.0.0.1:8003 HANDOFF_WEBHOOK_SECRET=dev-handoff-secret uv run uvicorn app.main:app --reload --port 8000
+LEGACY_CRM_BASE_URL=http://127.0.0.1:8001 LEGACY_CRM_API_KEY=dev-crm-key SCHEDULER_BASE_URL=http://127.0.0.1:8002 SCHEDULER_JWT_SECRET=dev-scheduler-secret-at-least-32-bytes HANDOFF_BASE_URL=http://127.0.0.1:8003 HANDOFF_WEBHOOK_SECRET=dev-handoff-secret uv run uvicorn app.main:app --reload --port 8000
 ```
 
 Terminal 2: mock CRM service
@@ -31,7 +31,7 @@ MOCK_CRM_API_KEY=dev-crm-key uv run uvicorn mock_services.legacy_crm_api:app --r
 Terminal 3: mock scheduling service
 
 ```bash
-MOCK_SCHEDULER_JWT_SECRET=dev-scheduler-secret uv run uvicorn mock_services.scheduling_api:app --reload --port 8002
+MOCK_SCHEDULER_JWT_SECRET=dev-scheduler-secret-at-least-32-bytes uv run uvicorn mock_services.scheduling_api:app --reload --port 8002
 ```
 
 Terminal 4: mock handoff service
@@ -170,17 +170,16 @@ Expected response shape:
 
 If the evidence is weak or missing, the route returns `status: "insufficient_context"` with a safe fallback answer and no citations instead of inventing a policy answer.
 
-## Part 6B: single-turn fact extraction
+## Prompt-driven conversations
 
-PawLine now includes a minimal turn-understanding layer for converting one natural-language caller message into typed observations.
+The conversation endpoints use `PromptAgentRuntime` to send each caller message
+through the Router and one specialist. The specialist can request approved tools;
+Python executes their prepared handlers and saves the conversation state.
 
-- The LLM converts natural language into typed facts such as a phone number, pet reference, concern text, intake updates, or appointment selection.
-- It does not make routing or safety decisions, and it does not choose tools or perform workflow actions.
-- `ExtractedIntakeUpdates` represents only what was clearly present in the newest message; `ConversationState` remains the accumulated memory across a conversation.
-- Deterministic orchestration and tool execution are intentionally deferred to future 6C work.
-- The automated tests use mocked structured output rather than real OpenAI calls.
-
-This is a fact-extraction boundary only: the model may interpret a caller message, but it must not mutate `ConversationState`, create a handoff, or book an appointment.
+The runtime and conversation store are shared across HTTP requests in this process.
+The Router and runtime-configured specialists share one OpenAI client. The prepared
+Policy Agent keeps its existing retrieval dependencies. Tests use fake model and
+service clients without making external API calls.
 
 ## Part 6A: conversation memory foundation
 

@@ -1,0 +1,174 @@
+"""Load PawLine's Jinja templates and turn typed context into prompt text."""
+
+from __future__ import annotations
+
+from pathlib import Path
+
+from jinja2 import Environment, FileSystemLoader, StrictUndefined, TemplateError
+
+from .prompt_context import PromptContext
+
+# This identifies the exact instructions used for an LLM call, like a version number for application code.
+FRONT_DESK_PROMPT_VERSION = "front-desk-v1"
+ROUTER_PROMPT_VERSION = "router-v6"
+VERIFICATION_PROMPT_VERSION = "verification-v2"
+POLICY_PROMPT_VERSION = "policy-v2"
+INTAKE_PROMPT_VERSION = "intake-v4"
+HUMAN_HANDOFF_PROMPT_VERSION = "human-handoff-v3"
+SCHEDULING_PROMPT_VERSION = "scheduling-v3"
+# Templates live beside this module so their instructions can be reviewed and versioned with the code.
+DEFAULT_TEMPLATE_DIRECTORY = Path(__file__).resolve().parent.parent / "prompts"
+
+
+class PromptRenderingError(RuntimeError):
+    """Raised when PawLine cannot build a prompt from its template and context.
+
+    For example, this occurs when a required Jinja variable is missing or the
+    template cannot be loaded.
+    """
+
+
+class PromptRenderer:
+    """Build the complete instructions that PawLine will send to the LLM.
+
+    It takes a PromptContext, fills the matching blanks in a Jinja prompt
+    template, and returns the finished prompt as text. It does not retrieve
+    conversation data, call the LLM, or make agent decisions.
+    """
+
+    def __init__(self, template_directory: Path | None = None) -> None:
+        """Prepare to load templates from the package or a supplied directory.
+
+        The optional directory is useful for tests. Creating a renderer does not
+        load conversation data or render a prompt.
+        """
+        self._environment = Environment(
+            loader=FileSystemLoader(template_directory or DEFAULT_TEMPLATE_DIRECTORY),
+            undefined=StrictUndefined,
+            autoescape=False,
+            keep_trailing_newline=True,
+        )
+
+    @property
+    def prompt_version(self) -> str:
+        """Return the version label attached to the front-desk instructions."""
+        return FRONT_DESK_PROMPT_VERSION
+
+    def render_front_desk(self, context: PromptContext) -> str:
+        """Render front-desk instructions from the supplied PromptContext.
+
+        The context is prepared by trusted application code, usually from
+        ConversationState. This method returns prompt text; the caller decides
+        whether and when to send it to an LLM.
+        """
+        template_values = context.model_dump(mode="json")
+        template_values["prompt_version"] = self.prompt_version
+
+        try:
+            template = self._environment.get_template("front_desk.md.j2")
+            return template.render(**template_values)
+        except (OSError, TemplateError) as exc:
+            raise PromptRenderingError(
+                f"Unable to render prompt version '{self.prompt_version}'."
+            ) from exc
+
+    def render_router(self, context: PromptContext) -> str:
+        """Render router instructions from allowlisted saved context.
+
+        The context contains only conversation facts needed for routing. This
+        method returns prompt text; it does not select a destination or execute a
+        specialist.
+        """
+        template_values = context.model_dump(mode="json")
+        template_values["prompt_version"] = ROUTER_PROMPT_VERSION
+
+        try:
+            template = self._environment.get_template("router.md.j2")
+            return template.render(**template_values)
+        except (OSError, TemplateError) as exc:
+            raise PromptRenderingError(
+                f"Unable to render prompt version '{ROUTER_PROMPT_VERSION}'."
+            ) from exc
+
+    def render_verification(self, context: PromptContext) -> str:
+        """Render verification instructions from allowlisted saved context.
+
+        The context contains only conversation facts needed for safe customer
+        identification. This method returns prompt text; it does not call the CRM
+        or execute another agent.
+        """
+        template_values = context.model_dump(mode="json")
+        template_values["prompt_version"] = VERIFICATION_PROMPT_VERSION
+
+        try:
+            template = self._environment.get_template("verification.md.j2")
+            return template.render(**template_values)
+        except (OSError, TemplateError) as exc:
+            raise PromptRenderingError(
+                f"Unable to render prompt version '{VERIFICATION_PROMPT_VERSION}'."
+            ) from exc
+
+    def render_policy(self, context: PromptContext) -> str:
+        """Render policy instructions without retrieving evidence or answering the question."""
+        template_values = context.model_dump(mode="json")
+        template_values["prompt_version"] = POLICY_PROMPT_VERSION
+
+        try:
+            template = self._environment.get_template("policy.md.j2")
+            return template.render(**template_values)
+        except (OSError, TemplateError) as exc:
+            raise PromptRenderingError(
+                f"Unable to render prompt version '{POLICY_PROMPT_VERSION}'."
+            ) from exc
+
+    def render_intake(self, context: PromptContext) -> str:
+        """Render intake instructions from allowlisted saved context."""
+        template_values = context.model_dump(mode="json")
+        template_values["prompt_version"] = INTAKE_PROMPT_VERSION
+
+        try:
+            template = self._environment.get_template("intake.md.j2")
+            return template.render(**template_values)
+        except (OSError, TemplateError) as exc:
+            raise PromptRenderingError(
+                f"Unable to render prompt version '{INTAKE_PROMPT_VERSION}'."
+            ) from exc
+
+    def render_human_handoff(self, context: PromptContext) -> str:
+        """Render human assistance instructions without sending the handoff request."""
+        template_values = context.model_dump(mode="json")
+        template_values["prompt_version"] = HUMAN_HANDOFF_PROMPT_VERSION
+
+        try:
+            template = self._environment.get_template("human_handoff.md.j2")
+            return template.render(**template_values)
+        except (OSError, TemplateError) as exc:
+            raise PromptRenderingError(
+                f"Unable to render prompt version '{HUMAN_HANDOFF_PROMPT_VERSION}'."
+            ) from exc
+
+    def render_scheduling(self, context: PromptContext) -> str:
+        """Render scheduling instructions without executing any tools."""
+        template_values = context.model_dump(mode="json")
+        template_values["prompt_version"] = SCHEDULING_PROMPT_VERSION
+
+        try:
+            template = self._environment.get_template("scheduling.md.j2")
+            return template.render(**template_values)
+        except (OSError, TemplateError) as exc:
+            raise PromptRenderingError(
+                f"Unable to render prompt version '{SCHEDULING_PROMPT_VERSION}'."
+            ) from exc
+
+
+__all__ = [
+    "FRONT_DESK_PROMPT_VERSION",
+    "HUMAN_HANDOFF_PROMPT_VERSION",
+    "INTAKE_PROMPT_VERSION",
+    "POLICY_PROMPT_VERSION",
+    "ROUTER_PROMPT_VERSION",
+    "SCHEDULING_PROMPT_VERSION",
+    "VERIFICATION_PROMPT_VERSION",
+    "PromptRenderer",
+    "PromptRenderingError",
+]
