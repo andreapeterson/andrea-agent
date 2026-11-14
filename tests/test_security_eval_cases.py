@@ -1,6 +1,5 @@
 """Human-labeled adversarial coverage and offline tag-selection integrity."""
 
-import asyncio
 import socket
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock
@@ -152,6 +151,8 @@ def test_tags_select_exact_cases_in_dataset_order_and_preserve_failure_localizat
 
     async def evaluate(cases, *args):
         captured.extend(cases)
+        if eval_type == "router":
+            args[-1].extend([10.0] * len(cases))
         return await fake_report(cases, eval_type, fail)
 
     run = AsyncMock(side_effect=evaluate)
@@ -171,7 +172,12 @@ def test_other_existing_tags_are_exact_filters_not_substring_matches(monkeypatch
     module, _, loader, _ = CONFIGURATIONS[eval_type]
     tag = "verification" if eval_type == "response" else "unverified"
     selected = [case for case in loader() if tag in case.tags]
-    run = AsyncMock(return_value=asyncio.run(fake_report(selected, eval_type, False)))
+    async def evaluate(cases, *args):
+        if eval_type == "router":
+            args[-1].extend([10.0] * len(cases))
+        return await fake_report(cases, eval_type, False)
+
+    run = AsyncMock(side_effect=evaluate)
     monkeypatch.setattr(module, "_evaluate", run)
     assert module.main(["--confirm-live", "--tag", tag]) == 0
     assert run.await_args.args[0] == selected

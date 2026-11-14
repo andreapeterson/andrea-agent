@@ -4,6 +4,7 @@ import asyncio
 import inspect
 import socket
 from importlib import import_module
+from itertools import count
 from types import SimpleNamespace
 from typing import cast
 from unittest.mock import Mock
@@ -90,6 +91,8 @@ def forbid_real_clients_and_network(monkeypatch):
     monkeypatch.setattr(AsyncOpenAI, "__init__", forbidden)
     monkeypatch.setattr(socket.socket, "connect", forbidden)
     monkeypatch.setattr(socket, "create_connection", forbidden)
+    ticks = count()
+    monkeypatch.setattr(live_router_eval, "perf_counter", lambda: next(ticks) / 10)
 
 
 @pytest.fixture

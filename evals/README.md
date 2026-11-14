@@ -136,6 +136,82 @@ Routing accuracy must be measured on PawLine's labeled cases before changing
 the production default. Fake-client tests verify contracts, validation, wiring,
 and shared scoring; they do not establish live accuracy or injection resistance.
 
+### Per-request Router latency benchmark (7G2)
+
+In a local live benchmark of 27 labeled routing cases, both backends achieved
+100% accuracy. The Decisions Router averaged 290 ms per request versus 1,907 ms
+for the Responses Router—a 6.58× mean-latency improvement. Results are
+environment-specific and may vary with network conditions, service load, and
+model changes.
+
+The live adapter uses `time.perf_counter()` immediately before and after
+`await router.route(...)`. Samples measure that operation's elapsed wall-clock
+duration in milliseconds, including SDK/network time, Router validation, and any
+SDK retries. They exclude CLI/Python startup, client construction, fixture
+loading, Jinja prompt rendering, report formatting, and client teardown. Calls
+remain sequential. Timing does not change either Router or the accuracy scorer.
+
+After the existing accuracy report, a completed run prints a `Router latency`
+block labeled **local live benchmark**, with backend, model, request count,
+passed/failed cases, total, mean, p50, p95, minimum, and maximum. Request count
+means completed Router calls, not individual HTTP retry attempts. Total is the
+sum of request durations, not whole-command runtime.
+Percentiles use **nearest rank**: sort N samples ascending and take the
+one-indexed sample at `ceil(p * N)`. For 27 samples, p50 selects position 14 and
+p95 selects position 26. p50 describes typical latency; p95 describes the slower
+tail. Small datasets give coarse percentile estimates.
+
+Every selected case must pass accuracy and have exactly one valid timing sample
+before a completed latency block is shown. Request failures, incorrect routes,
+missing/excess samples, and invalid durations cannot produce a successful
+benchmark; the command exits nonzero. The pure summary rejects empty input,
+booleans, negative/nonfinite values, and nonnumeric samples rather than dropping
+them. Timing records contain only numeric milliseconds, with backend/model
+added when formatting. No caller text, prompts, raw responses, probabilities,
+credentials, or headers are collected in timing records, and nothing is uploaded.
+
+Set `OPENAI_API_KEY` in the environment. These opt-in commands require
+`--confirm-live` and incur API costs. Run either backend or compare both:
+
+```bash
+uv run python -m evals.live_router_eval --confirm-live --router-backend responses --model gpt-6-luna --all-cases
+uv run python -m evals.live_router_eval --confirm-live --router-backend decisions --model gpt-6-luna --all-cases
+uv run python -m evals.live_router_eval --confirm-live --router-backend both --model gpt-6-luna --all-cases
+```
+
+Replace `--all-cases` with repeatable `--case-id` options or `--tag` to use a
+smaller selection. Selection and duplicate-ID handling are unchanged. In `both`
+mode the same selected cases run in dataset order through Responses, then
+Decisions, sequentially. Each backend retains its own accuracy report and timing
+samples. Only when both runs pass and have complete valid samples does the CLI
+print mean, p50, and p95 speedup ratios: **Responses latency / Decisions latency**.
+A ratio greater than one favors Decisions; a zero denominator displays `N/A`.
+No samples or wrong counts cause a safe nonzero failure, not an invented result.
+The default backend remains Responses; this command does not change production
+routing. Running both backends for all 27 cases normally makes 54 paid requests,
+with possible additional HTTP attempts if the SDK retries.
+
+Use `gpt-6-luna` for a same-model comparison. In `both` mode, a different
+Responses `--model` (or `OPENAI_ROUTER_MODEL`) applies only to Responses:
+Decisions still uses the adapter's fixed supported `gpt-6-luna` model. Both
+actual configured models and the mismatch are displayed. Such a run is not a
+same-model comparison. A Decisions-only run continues rejecting other models.
+
+Use the same dataset version, cases, machine, and approximate time window.
+Results depend on model, network, region, service load, and sample size;
+connection warmup and caching also matter. The combined command always runs
+Responses first, so order effects remain a caveat. Repeated independent runs,
+including alternating the individual backend commands, help reveal variability.
+One run is illustrative, not a universal performance guarantee. Compare accuracy
+alongside speed. Unit tests use fake routers and an injected clock without real
+waits; CI never runs live benchmarks or uploads benchmark artifacts.
+
+`/usr/bin/time` measures the whole process: Python and CLI startup, dataset
+loading, rendering, all requests, reporting, and teardown. This benchmark times
+only the awaited Router operation per case, so its summed durations deliberately
+exclude those surrounding costs. It measures client-observed elapsed time, not
+isolated server inference time.
+
 ## Specialist first actions (7D2)
 
 Router eval asks, “Which specialist?” Specialist eval asks, “Should this
