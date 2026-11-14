@@ -13,15 +13,31 @@ import pytest
 from openai import AsyncOpenAI, OpenAI
 
 from app.agents.policy_agent import PolicyAgent
-from app.agents.prompt_renderer import PromptRenderer
-from app.agents.router_agent import RouteDecision
-from app.agents.responses_tool_loop import MalformedToolCallError, ToolLoopLimitError, UnknownAgentToolError, run_agent_turn
-from app.agents.responses_tool_loop import AgentModelRequestError, ToolExecutionError
-from app.agents.prompt_renderer import POLICY_PROMPT_VERSION, ROUTER_PROMPT_VERSION
-from app.agents.router_agent import RouterRequestError
+from app.agents.prompt_renderer import (
+    POLICY_PROMPT_VERSION,
+    ROUTER_PROMPT_VERSION,
+    PromptRenderer,
+)
+from app.agents.responses_tool_loop import (
+    AgentModelRequestError,
+    MalformedToolCallError,
+    ToolExecutionError,
+    ToolLoopLimitError,
+    UnknownAgentToolError,
+    run_agent_turn,
+)
+from app.agents.router_agent import OpenAIRouter, RouteDecision, RouterRequestError
 from app.agents.search_policy_tool import create_search_policy_handler
-from app.agents.workflow_observation import WorkflowEventType, observe_specialist, observe_tool, observe_turn
-from app.agents.turn_trace_summary import format_turn_trace_summary, summarize_turn_trace
+from app.agents.turn_trace_summary import (
+    format_turn_trace_summary,
+    summarize_turn_trace,
+)
+from app.agents.workflow_observation import (
+    WorkflowEventType,
+    observe_specialist,
+    observe_tool,
+    observe_turn,
+)
 from app.integrations import HandoffClient, LegacyCRMClient, SchedulerClient
 from app.models.appointment import AppointmentType, BookingRequest
 from app.models.conversation import ConversationMessage, ConversationPhase
@@ -32,7 +48,6 @@ from app.services.policy_retriever import PolicyRetriever
 from app.services.prompt_agent_runtime import PromptAgentRuntime
 from app.services.routing import assess_routing
 from evals import live_conversation_eval
-from evals.response_eval import load_response_cases
 from evals.conversation_eval import (
     ConversationEvalCase,
     ConversationRunObservation,
@@ -46,9 +61,10 @@ from evals.live_conversation_eval import (
     DemoPolicyRetriever,
     DemoScheduler,
     LiveConversationEvaluationError,
-    create_live_run_conversation,
     create_demo_policy_retriever,
+    create_live_run_conversation,
 )
+from evals.response_eval import load_response_cases
 
 
 def speech(text="Controlled caller-facing reply."):
@@ -170,7 +186,7 @@ def build_runtime(client, observer=None, *, crm=None, scheduler=None, handoff=No
     renderer = PromptRenderer()
     runtime = PromptAgentRuntime(
         conversation_store=store, openai_client=client,
-        router_model="demo-router-model", specialist_model="demo-specialist-model",
+        router=OpenAIRouter(client, model="demo-router-model"), specialist_model="demo-specialist-model",
         prompt_renderer=renderer, legacy_crm_client=crm if crm is not None else DemoCRM(),
         scheduler_client=scheduler if scheduler is not None else DemoScheduler(),
         handoff_client=handoff if handoff is not None else DemoHandoff(), idempotency_key_factory=lambda: "demo-test-key",

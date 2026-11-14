@@ -1,10 +1,14 @@
 import uuid
+from contextlib import asynccontextmanager
 from typing import Annotated
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Query
 
 from app.agents.prompt_renderer import PromptRenderingError
-from app.agents.resource_limits import CallerMessageTooLargeError, validate_user_message_size
+from app.agents.resource_limits import (
+    CallerMessageTooLargeError,
+    validate_user_message_size,
+)
 from app.agents.responses_tool_loop import (
     AgentModelRequestError,
     MalformedToolCallError,
@@ -19,6 +23,7 @@ from app.dependencies import (
     get_legacy_crm_client,
     get_policy_answer_service,
     get_prompt_agent_runtime,
+    get_router_backend,
     get_scheduler_client,
 )
 from app.integrations import (
@@ -38,8 +43,17 @@ from app.integrations import (
     SlotNotFoundError,
     SlotUnavailableError,
 )
-from app.models.appointment import AppointmentSlot, AppointmentType, BookingConfirmation, BookingRequest
-from app.models.conversation_api import ConversationResponse, ConversationTurnRequest, conversation_response_from_result
+from app.models.appointment import (
+    AppointmentSlot,
+    AppointmentType,
+    BookingConfirmation,
+    BookingRequest,
+)
+from app.models.conversation_api import (
+    ConversationResponse,
+    ConversationTurnRequest,
+    conversation_response_from_result,
+)
 from app.models.customer import Customer
 from app.models.handoff import HandoffCreateRequest, HandoffReceipt, HandoffRequest
 from app.models.policy_answer import PolicyAnswerResponse, PolicyQuestionRequest
@@ -54,7 +68,14 @@ from app.services.policy_retriever import PolicyRetrievalError
 from app.services.prompt_agent_runtime import PromptAgentRuntime
 from app.services.routing import assess_routing
 
-app = FastAPI(title="PawLine")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    get_router_backend()
+    yield
+
+
+app = FastAPI(title="PawLine", lifespan=lifespan)
 
 PromptAgentRuntimeDep = Annotated[PromptAgentRuntime | None, Depends(get_prompt_agent_runtime)]
 

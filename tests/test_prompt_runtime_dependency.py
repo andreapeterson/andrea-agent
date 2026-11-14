@@ -7,11 +7,14 @@ from uuid import UUID
 
 import pytest
 from fastapi import FastAPI, Request
+from fastapi.testclient import TestClient
 from openai import AsyncOpenAI
 
 from app import dependencies
+from app.agents.decisions_router import OpenAIDecisionsRouter
 from app.agents.policy_agent import PolicyAgent
 from app.agents.prompt_renderer import PromptRenderer
+from app.agents.router_agent import OpenAIRouter
 from app.integrations import HandoffClient, LegacyCRMClient, SchedulerClient
 from app.services.conversation_store import InMemoryConversationStore
 from app.services.prompt_agent_runtime import PromptAgentRuntime
@@ -22,6 +25,7 @@ def configured_dependencies(monkeypatch):
     monkeypatch.setenv("OPENAI_API_KEY", "fake-api-key")
     monkeypatch.delenv("OPENAI_ROUTER_MODEL", raising=False)
     monkeypatch.delenv("OPENAI_SPECIALIST_MODEL", raising=False)
+    monkeypatch.delenv("PAWLINE_ROUTER_BACKEND", raising=False)
     client = Mock(spec=AsyncOpenAI)
     crm = AsyncMock(spec=LegacyCRMClient)
     scheduler = AsyncMock(spec=SchedulerClient)
@@ -62,6 +66,7 @@ async def test_runtime_and_store_are_cached_with_configured_clients_and_models(c
     assert reused._conversation_store.get("shared-conversation") == started.state
     assert runtime._openai_client is setup.client
     assert runtime._router._client is setup.client
+    assert isinstance(runtime._router, OpenAIRouter)
     assert runtime._legacy_crm_client is setup.crm
     assert runtime._scheduler_client is setup.scheduler
     assert runtime._handoff_client is setup.handoff
@@ -149,3 +154,43 @@ async def test_existing_process_store_is_reused(configured_dependencies) -> None
 
     assert runtime._conversation_store is store
     assert runtime._conversation_store.get("existing-conversation") == state
+
+
+@pytest.mark.asyncio
+async def test_decisions_backend_builds_one_router_with_the_shared_client(configured_dependencies, monkeypatch) -> None:
+    setup = configured_dependencies
+    monkeypatch.setenv("PAWLINE_ROUTER_BACKEND", "decisions")
+    monkeypatch.setenv("OPENAI_ROUTER_MODEL", "responses-only-model")
+    responses_constructor = Mock(side_effect=AssertionError("A second Router must not be constructed."))
+    monkeypatch.setattr("app.agents.router_factory.OpenAIRouter", responses_constructor)
+
+    runtime = await dependencies.get_prompt_agent_runtime(setup.request)
+    reused = await dependencies.get_prompt_agent_runtime(setup.request)
+
+    assert reused is runtime
+    assert isinstance(runtime._router, OpenAIDecisionsRouter)
+    assert runtime._router._client is runtime._openai_client is setup.client
+    assert runtime._router._model == "gpt-6-luna"
+    responses_constructor.assert_not_called()
+    setup.factories["AsyncOpenAI"].assert_called_once()
+
+
+@pytest.mark.asyncio
+async def test_unknown_backend_fails_before_dependencies_and_is_not_swallowed(configured_dependencies, monkeypatch) -> None:
+    setup = configured_dependencies
+    monkeypatch.setenv("PAWLINE_ROUTER_BACKEND", "PRIVATE_INVALID_BACKEND")
+
+    with pytest.raises(ValueError, match="PAWLINE_ROUTER_BACKEND must be responses or decisions") as error:
+        await dependencies.get_prompt_agent_runtime(setup.request)
+
+    assert "PRIVATE_INVALID_BACKEND" not in str(error.value)
+    for factory in setup.factories.values():
+        factory.assert_not_called()
+
+
+def test_unknown_backend_is_rejected_at_application_startup(monkeypatch) -> None:
+    from app.main import app
+
+    monkeypatch.setenv("PAWLINE_ROUTER_BACKEND", "invalid-backend")
+    with pytest.raises(ValueError, match="PAWLINE_ROUTER_BACKEND must be responses or decisions"), TestClient(app):
+        pytest.fail("Invalid configuration must prevent application startup.")

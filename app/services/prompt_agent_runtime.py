@@ -16,7 +16,7 @@ from app.agents.prompt_renderer import PromptRenderer
 from app.agents.record_intake_tool import create_record_intake_handler
 from app.agents.request_handoff_tool import create_request_handoff_handler
 from app.agents.resource_limits import MAX_RECENT_MESSAGES, validate_user_message_size
-from app.agents.router_agent import OpenAIRouter
+from app.agents.router_agent import Router
 from app.agents.router_handoff import route_and_respond
 from app.agents.scheduling_agent import SchedulingAgent
 from app.agents.scheduling_tools import (
@@ -45,7 +45,7 @@ class PromptAgentRuntime:
         *,
         conversation_store: ConversationStore,
         openai_client: AsyncOpenAI,
-        router_model: str,
+        router: Router,
         specialist_model: str,
         prompt_renderer: PromptRenderer,
         legacy_crm_client: LegacyCRMClient,
@@ -57,7 +57,7 @@ class PromptAgentRuntime:
     ) -> None:
         self._conversation_store = conversation_store
         self._openai_client = openai_client
-        self._router = OpenAIRouter(openai_client, model=router_model)
+        self._router = router
         self._specialist_model = specialist_model
         self._prompt_renderer = prompt_renderer
         self._legacy_crm_client = legacy_crm_client

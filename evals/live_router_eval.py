@@ -11,20 +11,31 @@ from typing import Any
 
 from openai import AsyncOpenAI
 
+from app.agents.decisions_router import DECISIONS_ROUTER_MODEL
 from app.agents.prompt_context import PromptContext
 from app.agents.prompt_renderer import PromptRenderer
-from app.agents.router_agent import OpenAIRouter
-from evals.failure_attribution import attribute_report_failures, format_failure_attribution_report
-from evals.router_eval import RouterEvalCase, format_router_report, load_router_cases, run_router_evaluation
+from app.agents.router_factory import RouterBackend, create_router
+from evals.failure_attribution import (
+    attribute_report_failures,
+    format_failure_attribution_report,
+)
+from evals.router_eval import (
+    RouterEvalCase,
+    format_router_report,
+    load_router_cases,
+    run_router_evaluation,
+)
 
 
 def create_live_route_case(
     openai_client: AsyncOpenAI,
     model: str,
     renderer: PromptRenderer,
+    *,
+    router_backend: RouterBackend = "responses",
 ) -> Callable[[PromptContext, str], Awaitable[str]]:
     """Prepare one Router for reuse across the selected evaluation cases."""
-    router = OpenAIRouter(openai_client, model=model)
+    router = create_router(openai_client, backend=router_backend, model=model)
 
     async def route_case(context: PromptContext, user_message: str) -> str:
         instructions = renderer.render_router(context)
@@ -34,16 +45,19 @@ def create_live_route_case(
     return route_case
 
 
-async def _evaluate(cases: list[RouterEvalCase], api_key: str, model: str) -> dict[str, Any]:
+async def _evaluate(
+    cases: list[RouterEvalCase], api_key: str, model: str, router_backend: RouterBackend = "responses",
+) -> dict[str, Any]:
     async with AsyncOpenAI(api_key=api_key) as openai_client:
-        route_case = create_live_route_case(openai_client, model, PromptRenderer())
+        route_case = create_live_route_case(openai_client, model, PromptRenderer(), router_backend=router_backend)
         return await run_router_evaluation(cases, route_case)
 
 
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--confirm-live", action="store_true", required=True, help="Confirm network requests and API cost")
-    parser.add_argument("--model", default=os.getenv("OPENAI_ROUTER_MODEL") or "gpt-6-luna")
+    parser.add_argument("--router-backend", choices=["responses", "decisions"], default="responses")
+    parser.add_argument("--model", help="Responses model override; Decisions supports only gpt-6-luna")
     selection = parser.add_mutually_exclusive_group(required=True)
     selection.add_argument("--case-id", action="append", help="Case to evaluate; repeat to select several")
     selection.add_argument("--tag", help="Select every case containing this exact tag")
@@ -53,8 +67,15 @@ def main(argv: Sequence[str] | None = None) -> int:
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key or not api_key.strip():
         parser.error("OPENAI_API_KEY is required for live evaluation")
-    if not args.model.strip():
+    model = args.model if args.model is not None else (
+        DECISIONS_ROUTER_MODEL if args.router_backend == "decisions"
+        else os.getenv("OPENAI_ROUTER_MODEL") or "gpt-6-luna"
+    )
+    if not model.strip():
         parser.error("The Router model must not be blank")
+    model = model.strip()
+    if args.router_backend == "decisions" and model != DECISIONS_ROUTER_MODEL:
+        parser.error("The Decisions Router supports only gpt-6-luna")
     try:
         cases = load_router_cases()
     except (OSError, ValueError):
@@ -75,7 +96,7 @@ def main(argv: Sequence[str] | None = None) -> int:
         selected_cases = [case for case in cases if args.all_cases or case.case_id in requested_ids]
 
     try:
-        report = asyncio.run(_evaluate(selected_cases, api_key, args.model.strip()))
+        report = asyncio.run(_evaluate(selected_cases, api_key, model, args.router_backend))
     except Exception:
         # Exception chains can contain credentials, prompts, or raw upstream responses.
         print("Live Router evaluation failed; no report was produced.", file=sys.stderr)
@@ -87,6 +108,7 @@ def main(argv: Sequence[str] | None = None) -> int:
     except Exception:
         print("Live Router failure localization failed; no report was produced.", file=sys.stderr)
         return 1
+    print(f"Router backend: {args.router_backend}; model: {model}")
     print(text)
     if localization is not None:
         print()

@@ -22,16 +22,33 @@ from app.agents.resource_limits import (
     InstructionsTooLargeError,
 )
 from app.agents.responses_tool_loop import AgentModelRequestError
-from app.agents.router_agent import RouteDecision, RouterRequestError
+from app.agents.router_agent import OpenAIRouter, RouteDecision, RouterRequestError
 from app.agents.router_handoff import SpecialistNotAvailableError
-from app.integrations import HandoffClient, LegacyCRMClient, SchedulerClient, SchedulerRequestError
-from app.models.appointment import AppointmentSlot, AppointmentType, BookingConfirmation, BookingStatus
-from app.models.conversation import ConversationMessage, ConversationPhase, ConversationRole
+from app.integrations import (
+    HandoffClient,
+    LegacyCRMClient,
+    SchedulerClient,
+    SchedulerRequestError,
+)
+from app.models.appointment import (
+    AppointmentSlot,
+    AppointmentType,
+    BookingConfirmation,
+    BookingStatus,
+)
+from app.models.conversation import (
+    ConversationMessage,
+    ConversationPhase,
+    ConversationRole,
+)
 from app.models.customer import Customer, Pet, PetSpecies
 from app.models.handoff import HandoffReceipt, HandoffStatus
 from app.models.routing import IntakeAnswers
 from app.services import prompt_agent_runtime
-from app.services.conversation_store import ConversationNotFoundError, InMemoryConversationStore
+from app.services.conversation_store import (
+    ConversationNotFoundError,
+    InMemoryConversationStore,
+)
 from app.services.prompt_agent_runtime import PromptAgentRuntime
 from app.services.routing import assess_routing
 
@@ -104,7 +121,7 @@ def runtime_setup():
     runtime = PromptAgentRuntime(
         conversation_store=store,
         openai_client=client,
-        router_model="router-model",
+        router=OpenAIRouter(client, model="router-model"),
         specialist_model="specialist-model",
         prompt_renderer=renderer,
         legacy_crm_client=crm,

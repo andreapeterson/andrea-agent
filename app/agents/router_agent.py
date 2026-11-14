@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import inspect
-from typing import Literal
+from typing import Literal, Protocol
 
 from openai import AsyncOpenAI
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.agents.prompt_renderer import ROUTER_PROMPT_VERSION
-from app.agents.resource_limits import validate_instructions_size, validate_user_message_size
+from app.agents.resource_limits import (
+    validate_instructions_size,
+    validate_user_message_size,
+)
 from app.agents.workflow_observation import observe_model_request
 
 
@@ -19,6 +22,9 @@ class RouterRequestError(RuntimeError):
 
 class RouterResponseError(RuntimeError):
     """Raised when the router response is missing or cannot be validated."""
+
+
+RouterDestination = Literal["verification", "intake", "policy", "scheduling", "human_handoff"]
 
 
 class RouteDecision(BaseModel):
@@ -32,8 +38,14 @@ class RouteDecision(BaseModel):
 
     model_config = ConfigDict(str_strip_whitespace=True, extra="forbid")
 
-    destination: Literal["verification", "intake", "policy", "scheduling", "human_handoff"]
+    destination: RouterDestination
     reason: str = Field(..., min_length=1)
+
+
+class Router(Protocol):
+    """Shared contract for routing without executing a specialist or tool."""
+
+    async def route(self, *, instructions: str, user_message: str) -> RouteDecision: ...
 
 
 class OpenAIRouter:
@@ -95,4 +107,4 @@ class OpenAIRouter:
             raise RouterResponseError("Router response was malformed.") from exc
 
 
-__all__ = ["OpenAIRouter", "RouteDecision", "RouterRequestError", "RouterResponseError"]
+__all__ = ["OpenAIRouter", "RouteDecision", "Router", "RouterDestination", "RouterRequestError", "RouterResponseError"]

@@ -8,6 +8,11 @@ from openai import AsyncOpenAI
 
 from app.agents.policy_agent import PolicyAgent
 from app.agents.prompt_renderer import PromptRenderer
+from app.agents.router_factory import (
+    RouterBackend,
+    create_router,
+    validate_router_backend,
+)
 from app.agents.search_policy_tool import create_search_policy_handler
 from app.integrations import (
     HandoffClient,
@@ -22,7 +27,13 @@ from app.services.policy_retriever import PolicyRetriever
 from app.services.prompt_agent_runtime import PromptAgentRuntime
 
 
+def get_router_backend() -> RouterBackend:
+    """Validate configuration before lazy initialization can hide an invalid value."""
+    return validate_router_backend(os.getenv("PAWLINE_ROUTER_BACKEND", "responses"))
+
+
 async def get_prompt_agent_runtime(request: Request) -> PromptAgentRuntime | None:
+    router_backend = get_router_backend()
     # app.state owns the shared runtime so conversations survive across HTTP requests in this process.
     app_state = request.app.state
     runtime = getattr(app_state, "prompt_agent_runtime", None)
@@ -61,7 +72,10 @@ async def get_prompt_agent_runtime(request: Request) -> PromptAgentRuntime | Non
             runtime = PromptAgentRuntime(
                 conversation_store=store,
                 openai_client=openai_client,
-                router_model=os.getenv("OPENAI_ROUTER_MODEL", "gpt-6-luna"),
+                router=create_router(
+                    openai_client, backend=router_backend,
+                    model=os.getenv("OPENAI_ROUTER_MODEL", "gpt-6-luna"),
+                ),
                 specialist_model=os.getenv("OPENAI_SPECIALIST_MODEL", "gpt-6-luna"),
                 prompt_renderer=PromptRenderer(),
                 legacy_crm_client=crm_client,

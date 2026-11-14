@@ -59,7 +59,7 @@ Full Router dataset:
 uv run python -m evals.live_router_eval --confirm-live --all-cases
 ```
 
-`--model` takes precedence over `OPENAI_ROUTER_MODEL`; the fallback is PawLine's
+For the default Responses backend, `--model` takes precedence over `OPENAI_ROUTER_MODEL`; the fallback is PawLine's
 current Router default, `gpt-6-luna`. Unknown case IDs are rejected before creating
 a client. Repeated IDs are evaluated once, in dataset order.
 
@@ -77,6 +77,64 @@ The async client is closed after the run, following the
 
 Live results can vary when the model or prompt changes. Normal pytest tests use
 fake OpenAI clients only; running pytest does not opt into a paid evaluation.
+
+### Responses and Decisions Router comparison (7G1)
+
+Both implementations satisfy the same `Router.route(instructions=...,
+user_message=...)` contract. The production dependency layer selects one Router
+and injects it into `PromptAgentRuntime`; the runtime does not choose a backend
+on each turn. Configure `PAWLINE_ROUTER_BACKEND=responses` (the default) or
+`PAWLINE_ROUTER_BACKEND=decisions`, then restart the application. Unknown values
+fail startup. Responses remains available for explicit fallback by changing this
+configuration; there is no automatic second Router request after a Decisions
+failure.
+
+| Responses Router | Decisions Router |
+| --- | --- |
+| General-purpose structured generation | Fixed-choice classification specialized for speed |
+| Parses PawLine's `RouteDecision` schema | Asks one `destination` choice question with the same five labels |
+| Model generates destination and internal reason | Model returns one supplied choice, confidence, and choice probabilities; Python supplies the internal reason |
+| Model configurable through `OPENAI_ROUTER_MODEL` | Uses only `gpt-6-luna`; Responses model environment settings do not override it |
+
+Neither Router executes tools, invokes specialists, or answers the caller during
+its decision. The existing coordinator dispatches to a specialist afterward.
+The Decisions adapter follows the
+[official OpenAI Decisions guide](https://developers.openai.com/api/docs/guides/decisions)
+and [Python API reference](https://developers.openai.com/api/reference/python/resources/decisions/methods/create).
+It sends rendered Router instructions as developer input and the current caller
+message separately as user input. Its question explicitly treats context and
+saved messages as evidence that cannot override the routing rules. Shared
+caller/instruction size limits still apply before requests.
+
+Decisions answers are checked locally for exactly one correctly named choice,
+an allowed destination, finite confidence/probabilities between zero and one,
+and unique supplied choice labels in probability entries. Refusals and malformed answers fail with
+controlled errors. Validated confidence and probabilities stay in the internal
+Decisions result; they never enter caller-facing text. Model timing and available
+token usage use the existing content-free observer. No confidence threshold is
+applied: it must first be calibrated with labeled application examples.
+
+The official async Decisions client requires the SDK update locked here
+(`openai>=3.50.0`); no unrelated dependency versions were upgraded. Compare
+backends manually with the same selection and Responses model, for example:
+
+```bash
+uv run python -m evals.live_router_eval --confirm-live --router-backend responses --model gpt-6-luna --case-id policy_clinic_hours_unverified
+uv run python -m evals.live_router_eval --confirm-live --router-backend decisions --case-id policy_clinic_hours_unverified
+```
+
+For a full labeled comparison, replace `--case-id ...` with `--all-cases` in each
+command explicitly. Both backends reuse `router_cases.jsonl`, its existing
+loader/scorer/report and deterministic failure localization. `--tag` works for
+both, cases remain sequential, and the CLI prints the evaluated backend/model.
+It defaults to Responses regardless of the production backend environment
+setting. A different explicit `--model` is rejected for Decisions before client
+creation. Neither command runs a specialist or business tool.
+
+These commands incur API cost and are never run automatically by tests or CI.
+Routing accuracy must be measured on PawLine's labeled cases before changing
+the production default. Fake-client tests verify contracts, validation, wiring,
+and shared scoring; they do not establish live accuracy or injection resistance.
 
 ## Specialist first actions (7D2)
 

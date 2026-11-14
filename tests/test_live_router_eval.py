@@ -11,6 +11,7 @@ from unittest.mock import Mock
 import pytest
 from openai import AsyncOpenAI
 
+from app.agents import router_factory
 from app.agents.human_handoff_agent import HumanHandoffAgent
 from app.agents.intake_agent import IntakeAgent
 from app.agents.policy_agent import PolicyAgent
@@ -22,7 +23,11 @@ from app.agents.verification_agent import VerificationAgent
 from app.integrations import HandoffClient, LegacyCRMClient, SchedulerClient
 from app.services.policy_retriever import PolicyRetriever
 from evals import live_router_eval
-from evals.router_eval import load_router_cases
+from evals.router_eval import (
+    format_router_report,
+    load_router_cases,
+    run_router_evaluation,
+)
 
 SMOKE_CASE = "policy_clinic_hours_unverified"
 FAKE_KEY = "fake-api-key-never-print"
@@ -51,9 +56,21 @@ class FakeResponses:
             self.active -= 1
 
 
+class FakeDecisions(FakeResponses):
+    async def create(self, **kwargs):
+        response = await self.parse(**kwargs)
+        destination = response.output_parsed.destination if response.output_parsed is not None else None
+        return SimpleNamespace(answers=[] if destination is None else [SimpleNamespace(
+            type="choice", name="destination", choice=destination, confidence=0.8,
+            probabilities=[{"value": value, "probability": 0.8 if value == destination else 0.05}
+                           for value in ("verification", "intake", "policy", "scheduling", "human_handoff")],
+        )])
+
+
 class FakeOpenAIClient:
     def __init__(self) -> None:
         self.responses = FakeResponses()
+        self.decisions = FakeDecisions()
         self.entered = False
         self.closed = False
 
@@ -89,7 +106,7 @@ def cli_setup(monkeypatch):
 async def test_adapter_reuses_one_router_and_client_renders_real_prompt_and_returns_destination(monkeypatch) -> None:
     client = FakeOpenAIClient()
     constructor = Mock(wraps=OpenAIRouter)
-    monkeypatch.setattr(live_router_eval, "OpenAIRouter", constructor)
+    monkeypatch.setattr(router_factory, "OpenAIRouter", constructor)
     renderer = PromptRenderer()
     context = PromptContext(
         active_agent="router", customer_verified=False,
@@ -120,7 +137,8 @@ async def test_adapter_reuses_one_router_and_client_renders_real_prompt_and_retu
 
 
 @pytest.mark.asyncio
-async def test_adapter_constructs_no_specialists_integrations_or_handlers(monkeypatch) -> None:
+@pytest.mark.parametrize("router_backend", ["responses", "decisions"])
+async def test_adapter_constructs_no_specialists_integrations_or_handlers(monkeypatch, router_backend) -> None:
     def forbidden(*args, **kwargs):
         raise AssertionError("Router evaluation must not use specialists, integrations, or handlers")
 
@@ -138,7 +156,8 @@ async def test_adapter_constructs_no_specialists_integrations_or_handlers(monkey
             monkeypatch.setattr(import_module(module_name), name, forbidden)
     client = FakeOpenAIClient()
     client.responses.destinations = ["human_handoff"]
-    route_case = live_router_eval.create_live_route_case(cast(AsyncOpenAI, client), "router-model", PromptRenderer())
+    client.decisions.destinations = ["human_handoff"]
+    route_case = live_router_eval.create_live_route_case(cast(AsyncOpenAI, client), "gpt-6-luna", PromptRenderer(), router_backend=router_backend)
 
     assert await route_case(PromptContext(), "I want to speak to a person.") == "human_handoff"
 
@@ -291,3 +310,78 @@ def test_client_initialization_errors_are_not_printed(cli_setup, capsys) -> None
     assert live_router_eval.main(["--confirm-live", "--case-id", SMOKE_CASE]) == 1
     output = capsys.readouterr()
     assert FAKE_KEY not in output.out + output.err
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("router_backend", ["responses", "decisions"])
+async def test_both_adapters_use_the_existing_dataset_and_offline_scorer(router_backend):
+    client = FakeOpenAIClient()
+    cases = load_router_cases()
+    selected_api = getattr(client, "decisions" if router_backend == "decisions" else "responses")
+    selected_api.destinations = [case.expected_destination for case in cases]
+    route_case = live_router_eval.create_live_route_case(client, "gpt-6-luna", PromptRenderer(), router_backend=router_backend)
+
+    report = await run_router_evaluation(cases, route_case)
+
+    assert report["total"] == report["passed"] == len(cases)
+    assert len(selected_api.calls) == len(cases) and selected_api.max_active == 1
+    assert "Accuracy: 100.0%" in format_router_report(report)
+    unused_api = client.responses if router_backend == "decisions" else client.decisions
+    assert unused_api.calls == []
+
+
+def test_decisions_cli_selects_only_requested_case_and_reports_backend_and_model(cli_setup, monkeypatch, capsys):
+    client, factory = cli_setup
+    monkeypatch.setenv("OPENAI_ROUTER_MODEL", "responses-only-model")
+    status = live_router_eval.main(["--confirm-live", "--router-backend", "decisions", "--case-id", SMOKE_CASE])
+
+    assert status == 0
+    assert len(client.decisions.calls) == 1 and client.responses.calls == []
+    assert client.decisions.calls[0]["model"] == "gpt-6-luna"
+    factory.assert_called_once_with(api_key=FAKE_KEY)
+    assert client.closed
+    output = capsys.readouterr()
+    assert "Router backend: decisions; model: gpt-6-luna" in output.out
+    assert "Total: 1\nPassed: 1" in output.out and output.err == ""
+
+
+def test_responses_default_does_not_follow_production_backend_setting(cli_setup, monkeypatch, capsys):
+    client, _ = cli_setup
+    monkeypatch.setenv("PAWLINE_ROUTER_BACKEND", "decisions")
+    assert live_router_eval.main(["--confirm-live", "--case-id", SMOKE_CASE]) == 0
+    assert len(client.responses.calls) == 1 and client.decisions.calls == []
+    assert "Router backend: responses; model: gpt-6-luna" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("arguments", [
+    ["--router-backend", "unknown"],
+    ["--router-backend", "decisions", "--model", "unsupported-model"],
+])
+def test_invalid_backend_or_decisions_model_is_rejected_before_client_creation(cli_setup, arguments):
+    _, factory = cli_setup
+    with pytest.raises(SystemExit) as caught:
+        live_router_eval.main(["--confirm-live", "--case-id", SMOKE_CASE, *arguments])
+    assert caught.value.code == 2
+    factory.assert_not_called()
+
+
+@pytest.mark.parametrize("failure", [RuntimeError(f"{FAKE_KEY} PRIVATE_PROMPT PRIVATE_RESPONSE"), None])
+def test_decisions_cli_errors_are_safe_and_close_client(cli_setup, capsys, failure):
+    client, _ = cli_setup
+    client.decisions.destinations = [failure]
+    assert live_router_eval.main(["--confirm-live", "--router-backend", "decisions", "--case-id", SMOKE_CASE]) == 1
+    assert client.closed and client.responses.calls == []
+    output = capsys.readouterr()
+    assert output.out == ""
+    assert output.err == "Live Router evaluation failed; no report was produced.\n"
+
+
+def test_decisions_tag_selection_runs_same_cases_sequentially(cli_setup, capsys):
+    client, _ = cli_setup
+    selected = [case for case in load_router_cases() if "prompt_injection" in case.tags]
+    client.decisions.destinations = [case.expected_destination for case in selected]
+    assert live_router_eval.main(["--confirm-live", "--router-backend", "decisions", "--tag", "prompt_injection"]) == 0
+    assert len(client.decisions.calls) == len(selected)
+    assert client.decisions.max_active == 1 and client.responses.calls == []
+    assert [call["input"][1]["content"] for call in client.decisions.calls] == [case.user_message for case in selected]
+    assert "Failure localization" not in capsys.readouterr().out

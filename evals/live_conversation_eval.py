@@ -15,17 +15,21 @@ from openai import AsyncOpenAI
 
 from app.agents.policy_agent import PolicyAgent
 from app.agents.prompt_renderer import PromptRenderer
+from app.agents.router_agent import OpenAIRouter
 from app.agents.search_policy_tool import create_search_policy_handler
 from app.agents.workflow_observation import WorkflowEvent, WorkflowEventType
-from app.models.appointment import AppointmentSlot, AppointmentType, BookingConfirmation, BookingRequest
+from app.models.appointment import (
+    AppointmentSlot,
+    AppointmentType,
+    BookingConfirmation,
+    BookingRequest,
+)
 from app.models.customer import Customer, Pet
 from app.models.handoff import HandoffReceipt, HandoffRequest
 from app.models.policy import PolicyChunk
 from app.models.retrieval import PolicySearchResult
 from app.services.conversation_store import InMemoryConversationStore
 from app.services.prompt_agent_runtime import PromptAgentRuntime
-from evals.failure_attribution import attribute_report_failures, format_failure_attribution_report
-from evals.response_eval import load_response_cases
 from evals.conversation_eval import (
     ConversationEvalCase,
     ConversationRunObservation,
@@ -33,6 +37,11 @@ from evals.conversation_eval import (
     load_conversation_cases,
     run_conversation_evaluation,
 )
+from evals.failure_attribution import (
+    attribute_report_failures,
+    format_failure_attribution_report,
+)
+from evals.response_eval import load_response_cases
 
 DEMO_PHONES = ("202-555-0142", "202-555-0143")
 DEMO_PET_IDS = {f"demo-pet-maize-{phone[-4:]}" for phone in DEMO_PHONES}
@@ -163,7 +172,7 @@ def create_live_run_conversation(
             )
             runtime = PromptAgentRuntime(
                 conversation_store=store, openai_client=openai_client,
-                router_model=router_model, specialist_model=specialist_model,
+                router=OpenAIRouter(openai_client, model=router_model), specialist_model=specialist_model,
                 prompt_renderer=renderer, legacy_crm_client=DemoCRM(),
                 scheduler_client=DemoScheduler(), handoff_client=DemoHandoff(),
                 policy_agent=policy_agent,

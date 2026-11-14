@@ -2,10 +2,10 @@
 
 from __future__ import annotations
 
-from app.agents.intake_agent import IntakeAgent
 from app.agents.human_handoff_agent import HumanHandoffAgent
-from app.agents.prompt_context import PromptContext
+from app.agents.intake_agent import IntakeAgent
 from app.agents.policy_agent import PolicyAgent
+from app.agents.prompt_context import PromptContext
 from app.agents.prompt_renderer import (
     HUMAN_HANDOFF_PROMPT_VERSION,
     INTAKE_PROMPT_VERSION,
@@ -14,9 +14,9 @@ from app.agents.prompt_renderer import (
     VERIFICATION_PROMPT_VERSION,
     PromptRenderer,
 )
-from app.agents.router_agent import OpenAIRouter, RouteDecision
-from app.agents.verification_agent import VerificationAgent
+from app.agents.router_agent import Router
 from app.agents.scheduling_agent import SchedulingAgent
+from app.agents.verification_agent import VerificationAgent
 from app.agents.workflow_observation import observe_specialist
 
 SPECIALIST_PROMPT_VERSIONS = {
@@ -34,7 +34,7 @@ class SpecialistNotAvailableError(RuntimeError):
 
 def route_and_respond(
     *,
-    router: OpenAIRouter,
+    router: Router,
     renderer: PromptRenderer,
     verification_agent: VerificationAgent,
     policy_agent: PolicyAgent | None = None,

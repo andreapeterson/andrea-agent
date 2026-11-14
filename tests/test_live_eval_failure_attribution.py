@@ -8,12 +8,32 @@ from unittest.mock import AsyncMock, Mock
 import pytest
 from openai import AsyncOpenAI, OpenAI
 
-from evals import live_conversation_eval, live_response_eval, live_router_eval, live_specialist_eval
-from evals.conversation_eval import ConversationRunObservation, load_conversation_cases, run_conversation_evaluation
-from evals.failure_attribution import attribute_report_failures, format_failure_attribution_report
-from evals.response_eval import ResponseJudgeResult, load_response_cases, run_response_evaluation
+from evals import (
+    live_conversation_eval,
+    live_response_eval,
+    live_router_eval,
+    live_specialist_eval,
+)
+from evals.conversation_eval import (
+    ConversationRunObservation,
+    load_conversation_cases,
+    run_conversation_evaluation,
+)
+from evals.failure_attribution import (
+    attribute_report_failures,
+    format_failure_attribution_report,
+)
+from evals.response_eval import (
+    ResponseJudgeResult,
+    load_response_cases,
+    run_response_evaluation,
+)
 from evals.router_eval import load_router_cases, run_router_evaluation
-from evals.specialist_eval import SpecialistFirstAction, load_specialist_cases, run_specialist_evaluation
+from evals.specialist_eval import (
+    SpecialistFirstAction,
+    load_specialist_cases,
+    run_specialist_evaluation,
+)
 
 MODULES = {
     "router": (live_router_eval, "format_router_report", "router_selection"),
@@ -74,6 +94,8 @@ def test_original_report_output_and_exit_code_are_preserved_with_explicit_locali
     source = asyncio.run(make_report(eval_type, passed=passed))
     before = deepcopy(source)
     original_text = getattr(module, formatter_name)(source)
+    if eval_type == "router":
+        original_text = "Router backend: responses; model: test-router-model\n" + original_text
     evaluate = AsyncMock(return_value=source)
     attribution = Mock(wraps=attribute_report_failures)
     localization_formatter = Mock(wraps=format_failure_attribution_report)
