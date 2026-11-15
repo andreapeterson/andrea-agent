@@ -54,6 +54,56 @@ Expected response:
 {"status": "ok"}
 ```
 
+## Runtime secrets (7G3)
+
+The runtime reuses `app.infisical.get_openai_api_key()`. Configure only
+`INFISICAL_CLIENT_ID`, `INFISICAL_CLIENT_SECRET`, and `INFISICAL_PROJECT_ID`
+securely in the shell or deployment environment. These bootstrap credentials
+authenticate the workload using Machine Identity/Universal Auth. Give that
+identity only read access to the `OPENAI_API_KEY` secret in `dev` at `/` on
+Infisical Cloud (`https://app.infisical.com`).
+
+On the first runtime or policy-service initialization, Python runs the helper
+in a worker thread and uses its returned key to construct the shared OpenAI
+client. Later HTTP requests and caller turns reuse that client; shutdown closes
+it. The helper also caches successful retrieval per process. Restart the app
+after rotating the key. A missing configuration or failed lookup leaves the
+agent service unavailable, with no fallback to an environment OpenAI key. Health
+and direct non-OpenAI integration routes can still run without these credentials.
+Secrets stay in memory as credentials and never enter prompts, conversation
+state, workflow events, or API responses. Errors exclude SDK response details.
+Live evaluation CLIs retain their existing environment-key behavior.
+
+After setting the three bootstrap variables, test retrieval alone with
+`uv run python -m app.infisical`, or start the real application:
+
+```bash
+uv run --env-file .env.example --env-file .env uvicorn app.main:app --port 8000
+```
+
+For this local demo, `.env.example` supplies the existing mock-service settings;
+the later `.env` supplies your private Infisical configuration and overrides any
+matching demo settings. Do not use demo credentials for a deployed service.
+The Infisical bootstrap variables alone are insufficient for the full runtime:
+`LEGACY_CRM_API_KEY`, `SCHEDULER_JWT_SECRET`, and `HANDOFF_WEBHOOK_SECRET` must
+also be configured for their respective services. No environment OpenAI key is
+required or used.
+
+Then initialize the runtime:
+
+```bash
+curl -X POST http://127.0.0.1:8000/conversations
+```
+
+Initialization loads and indexes the policy documents using the shared client's
+embeddings API, so it requires working OpenAI embeddings access as well as
+Infisical access. A smoke-test success verifies retrieval, not OpenAI API access
+or the other integrations' configuration. Initialization failures keep the
+sanitized HTTP 503 and close the unused client; later requests can retry.
+The app does not automatically load `.env`. The standalone smoke check prints
+only success or a sanitized error and makes no OpenAI request. Automated tests
+mock the helper and embedding requests.
+
 ## Customer lookup check
 
 ```bash

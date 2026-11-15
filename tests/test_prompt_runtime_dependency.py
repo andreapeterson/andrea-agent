@@ -22,7 +22,8 @@ from app.services.prompt_agent_runtime import PromptAgentRuntime
 
 @pytest.fixture
 def configured_dependencies(monkeypatch):
-    monkeypatch.setenv("OPENAI_API_KEY", "fake-api-key")
+    key_loader = Mock(return_value="fake-api-key")
+    monkeypatch.setattr(dependencies, "get_openai_api_key", key_loader)
     monkeypatch.delenv("OPENAI_ROUTER_MODEL", raising=False)
     monkeypatch.delenv("OPENAI_SPECIALIST_MODEL", raising=False)
     monkeypatch.delenv("PAWLINE_ROUTER_BACKEND", raising=False)
@@ -43,7 +44,7 @@ def configured_dependencies(monkeypatch):
     request = Request({"type": "http", "app": FastAPI()})
     return SimpleNamespace(
         request=request, client=client, crm=crm, scheduler=scheduler,
-        handoff=handoff, policy=policy, factories=factories,
+        handoff=handoff, policy=policy, factories=factories, key_loader=key_loader,
     )
 
 
@@ -110,12 +111,9 @@ async def test_concurrent_initialization_builds_only_one_runtime(configured_depe
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("api_key", [None, "", "  "])
-async def test_missing_openai_configuration_returns_none_without_initializing_clients(configured_dependencies, monkeypatch, api_key) -> None:
+async def test_blank_helper_result_returns_none_without_initializing_clients(configured_dependencies, api_key) -> None:
     setup = configured_dependencies
-    if api_key is None:
-        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-    else:
-        monkeypatch.setenv("OPENAI_API_KEY", api_key)
+    setup.key_loader.return_value = api_key
 
     assert await dependencies.get_prompt_agent_runtime(setup.request) is None
     for factory in setup.factories.values():
@@ -140,7 +138,10 @@ async def test_unavailable_policy_agent_returns_none(configured_dependencies) ->
     setup = configured_dependencies
     setup.factories["get_policy_agent"].return_value = None
     assert await dependencies.get_prompt_agent_runtime(setup.request) is None
-    setup.factories["AsyncOpenAI"].assert_not_called()
+    # The application client is initialized independently of policy availability.
+    setup.factories["AsyncOpenAI"].assert_called_once_with(api_key="fake-api-key")
+    setup.client.close.assert_awaited_once_with()
+    assert setup.request.app.state.openai_client is None
 
 
 @pytest.mark.asyncio

@@ -1,6 +1,7 @@
 import asyncio
 import os
 import uuid
+from contextlib import suppress
 from pathlib import Path
 
 from fastapi import Request
@@ -14,6 +15,7 @@ from app.agents.router_factory import (
     validate_router_backend,
 )
 from app.agents.search_policy_tool import create_search_policy_handler
+from app.infisical import get_openai_api_key
 from app.integrations import (
     HandoffClient,
     LegacyCRMClient,
@@ -30,6 +32,55 @@ from app.services.prompt_agent_runtime import PromptAgentRuntime
 def get_router_backend() -> RouterBackend:
     """Validate configuration before lazy initialization can hide an invalid value."""
     return validate_router_backend(os.getenv("PAWLINE_ROUTER_BACKEND", "responses"))
+
+
+async def get_openai_client(request: Request) -> AsyncOpenAI | None:
+    """Resolve the credential once and share one application-owned OpenAI client."""
+    state = request.app.state
+    client = getattr(state, "openai_client", None)
+    if client is not None:
+        return client
+    lock = getattr(state, "openai_client_lock", None)
+    if lock is None:
+        lock = state.openai_client_lock = asyncio.Lock()
+    async with lock:
+        client = getattr(state, "openai_client", None)
+        if client is not None:
+            return client
+        try:
+            # Universal Auth and retrieval use a synchronous SDK, outside the event loop.
+            api_key = await asyncio.to_thread(get_openai_api_key)
+            if not isinstance(api_key, str) or not api_key.strip():
+                return None
+            client = AsyncOpenAI(api_key=api_key)
+        except (OpenAIError, OSError, RuntimeError, TypeError, ValueError):
+            # Keep credentials and upstream details out of route errors and logs.
+            return None
+        state.openai_client = client
+        return client
+
+
+async def close_openai_client(request: Request, *, reset_locks: bool = True) -> None:
+    """Release the owned client and caches that refer to it on application shutdown."""
+    state = request.app.state
+    client = getattr(state, "openai_client", None)
+    try:
+        # Shutdown must not expose transport exceptions or credentials.
+        with suppress(Exception):
+            if client is not None:
+                await client.close()
+    finally:
+        for name in (
+            "openai_client", "prompt_agent_runtime", "policy_agent",
+            "policy_answer_service", "policy_retriever",
+        ):
+            setattr(state, name, None)
+        if reset_locks:
+            for name in (
+                "openai_client_lock", "prompt_agent_runtime_lock", "policy_agent_lock",
+                "policy_answer_service_lock", "policy_retriever_lock",
+            ):
+                setattr(state, name, None)
 
 
 async def get_prompt_agent_runtime(request: Request) -> PromptAgentRuntime | None:
@@ -50,8 +101,8 @@ async def get_prompt_agent_runtime(request: Request) -> PromptAgentRuntime | Non
         if runtime is not None:
             return runtime
 
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key or not api_key.strip():
+        openai_client = await get_openai_client(request)
+        if openai_client is None:
             return None
 
         try:
@@ -60,6 +111,7 @@ async def get_prompt_agent_runtime(request: Request) -> PromptAgentRuntime | Non
             handoff_client = get_handoff_client()
             policy_agent = await get_policy_agent(request)
             if policy_agent is None:
+                await close_openai_client(request, reset_locks=False)
                 return None
 
             store = getattr(app_state, "conversation_store", None)
@@ -67,8 +119,7 @@ async def get_prompt_agent_runtime(request: Request) -> PromptAgentRuntime | Non
                 store = InMemoryConversationStore()
                 app_state.conversation_store = store
 
-            # Construct one client shared by the router and runtime-configured specialists.
-            openai_client = AsyncOpenAI(api_key=api_key)
+            # Pass the existing application client to the router and specialists.
             runtime = PromptAgentRuntime(
                 conversation_store=store,
                 openai_client=openai_client,
@@ -85,6 +136,8 @@ async def get_prompt_agent_runtime(request: Request) -> PromptAgentRuntime | Non
                 idempotency_key_factory=lambda: uuid.uuid4().hex,
             )
         except (OpenAIError, OSError, RuntimeError, TypeError, ValueError, AttributeError, KeyError):
+            # Keep the existing locks: other requests may already be waiting on them.
+            await close_openai_client(request, reset_locks=False)
             return None
 
         app_state.prompt_agent_runtime = runtime
@@ -137,8 +190,8 @@ async def get_policy_answer_service(request: Request) -> PolicyAnswerService | N
         if service is not None:
             return service
 
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key or not api_key.strip():
+        client = await get_openai_client(request)
+        if client is None:
             app_state.policy_answer_service = None
             return None
 
@@ -150,7 +203,6 @@ async def get_policy_answer_service(request: Request) -> PolicyAnswerService | N
             return None
 
         try:
-            client = AsyncOpenAI(api_key=api_key)
             policy_model = os.getenv("OPENAI_POLICY_MODEL", "gpt-6-luna")
             retriever = await get_policy_retriever(request)
             if retriever is None:
@@ -187,12 +239,11 @@ async def get_policy_retriever(request: Request) -> PolicyRetriever | None:
         if retriever is not None:
             return retriever
 
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key or not api_key.strip():
+        client = await get_openai_client(request)
+        if client is None:
             return None
 
         try:
-            client = AsyncOpenAI(api_key=api_key)
             embedding_model = os.getenv("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
             policy_directory = Path(__file__).resolve().parent.parent / "knowledge" / "clinic_policies"
             chunks = load_policy_chunks(policy_directory)
@@ -223,8 +274,8 @@ async def get_policy_agent(request: Request) -> PolicyAgent | None:
         if agent is not None:
             return agent
 
-        api_key = os.getenv("OPENAI_API_KEY")
-        if not api_key or not api_key.strip():
+        client = await get_openai_client(request)
+        if client is None:
             return None
 
         try:
@@ -240,7 +291,7 @@ async def get_policy_agent(request: Request) -> PolicyAgent | None:
                 minimum_similarity=minimum_similarity,
             )
             agent = PolicyAgent(
-                client=AsyncOpenAI(api_key=api_key),
+                client=client,
                 model=os.getenv("OPENAI_POLICY_MODEL", "gpt-6-luna"),
                 prompt_renderer=PromptRenderer(),
                 search_policy_handler=search_policy_handler,
