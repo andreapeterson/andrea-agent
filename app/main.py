@@ -2,7 +2,7 @@ import uuid
 from contextlib import asynccontextmanager
 from typing import Annotated
 
-from fastapi import Depends, FastAPI, Header, HTTPException, Query
+from fastapi import Depends, FastAPI, Header, HTTPException, Query, Request
 
 from app.agents.prompt_renderer import PromptRenderingError
 from app.agents.resource_limits import (
@@ -19,6 +19,7 @@ from app.agents.responses_tool_loop import (
 from app.agents.router_agent import RouterRequestError, RouterResponseError
 from app.agents.router_handoff import SpecialistNotAvailableError
 from app.dependencies import (
+    close_openai_client,
     get_handoff_client,
     get_legacy_crm_client,
     get_policy_answer_service,
@@ -73,7 +74,11 @@ from app.services.routing import assess_routing
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     get_router_backend()
-    yield
+    request = Request({"type": "http", "app": app})
+    try:
+        yield
+    finally:
+        await close_openai_client(request)
 
 
 app = FastAPI(title="PawLine", lifespan=lifespan)
