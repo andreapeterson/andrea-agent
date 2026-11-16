@@ -30,6 +30,7 @@ from app.agents.record_intake_tool import (
 )
 from app.agents.request_handoff_tool import REQUEST_HANDOFF_TOOL
 from app.agents.responses_tool_loop import ToolExecutionError
+from app.agents.router_destinations import ROUTER_DESTINATIONS
 from app.agents.router_handoff import SpecialistNotAvailableError, route_and_respond
 from app.models.routing import IntakeAnswers, RoutingAction, RoutingLevel
 from app.services.conversation_store import InMemoryConversationStore
@@ -332,6 +333,7 @@ async def test_intake_router_dispatch_does_not_require_verification_or_pet_selec
         verification_agent=verification_agent,
         policy_agent=policy_agent,
         intake_agent=prepare_agent(handler, responses),
+        eligible_destinations=ROUTER_DESTINATIONS,
     )
 
     answer = await handle(context=PromptContext(customer_verified=False), user_message="My dog is coughing.")
@@ -396,14 +398,14 @@ def test_intake_renderer_reports_template_error(tmp_path) -> None:
 
 
 def test_router_prompt_distinguishes_public_intake_policy_and_account_scheduling() -> None:
-    prompt = PromptRenderer().render_router(PromptContext(customer_verified=False))
+    prompt = PromptRenderer().render_router(PromptContext(customer_verified=False), eligible_destinations=ROUTER_DESTINATIONS)
 
     assert f"`{ROUTER_PROMPT_VERSION}`" in prompt
     assert "If the message includes a medical concern, choose intake before account verification" in prompt
     assert "even before account verification or pet selection" in prompt
     assert "These questions are public and do not require account verification" in prompt
     assert '"I need to book an appointment." without verified identity → verification' in prompt
-    assert '"I need to book an appointment." with verified identity → scheduling' in prompt
+    assert '"I need to book an appointment." → scheduling' in prompt
 
 
 @pytest.mark.asyncio
@@ -417,6 +419,7 @@ async def test_intake_extension_keeps_unfinished_specialists_unavailable(destina
         verification_agent=Mock(),
         policy_agent=Mock(),
         intake_agent=prepare_agent(handler, responses),
+        eligible_destinations=ROUTER_DESTINATIONS,
     )
 
     with pytest.raises(SpecialistNotAvailableError, match=destination):

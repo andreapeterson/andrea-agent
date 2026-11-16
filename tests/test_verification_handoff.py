@@ -20,6 +20,7 @@ from app.agents import (
 )
 from app.agents.lookup_customer_tool import create_lookup_customer_handler
 from app.agents.responses_tool_loop import AgentModelRequestError
+from app.agents.router_destinations import ROUTER_DESTINATIONS
 from app.agents.router_handoff import SpecialistNotAvailableError, route_and_respond
 from app.agents.verification_agent import VerificationAgent
 from app.models.customer import Customer, Pet, PetSpecies
@@ -142,6 +143,7 @@ async def test_router_destination_verification_invokes_verification_agent() -> N
         router=OpenAIRouter(router_client, model="router-model"),
         renderer=PromptRenderer(),
         verification_agent=agent,
+        eligible_destinations=ROUTER_DESTINATIONS,
     )
 
     result = await service(
@@ -451,6 +453,7 @@ async def test_unimplemented_destination_raises_specialist_error() -> None:
             prompt_renderer=PromptRenderer(),
             lookup_customer_handler=lookup_customer_handler,
         ),
+        eligible_destinations=ROUTER_DESTINATIONS,
     )
 
     with pytest.raises(SpecialistNotAvailableError, match="policy"):
@@ -478,6 +481,7 @@ async def test_router_failure_does_not_invoke_verification_agent() -> None:
             prompt_renderer=PromptRenderer(),
             lookup_customer_handler=lookup_customer_handler,
         ),
+        eligible_destinations=ROUTER_DESTINATIONS,
     )
 
     with pytest.raises(RouterRequestError, match="Router request failed") as error:
@@ -514,6 +518,7 @@ async def test_verification_failure_is_not_reported_as_router_failure() -> None:
             prompt_renderer=PromptRenderer(),
             lookup_customer_handler=lookup_customer_handler,
         ),
+        eligible_destinations=ROUTER_DESTINATIONS,
     )
 
     with pytest.raises(AgentModelRequestError, match="Responses API request failed"):

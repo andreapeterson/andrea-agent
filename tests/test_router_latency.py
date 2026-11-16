@@ -12,6 +12,7 @@ from openai import AsyncOpenAI
 
 from app.agents.prompt_context import PromptContext
 from app.agents.prompt_renderer import PromptRenderer
+from app.agents.router_destinations import ROUTER_DESTINATIONS
 from evals import live_router_eval
 from evals.latency import (
     calculate_latency_speedup,
@@ -109,8 +110,9 @@ async def test_timer_surrounds_only_the_awaited_route_call(monkeypatch):
     samples = []
     renderer = Mock(spec=PromptRenderer)
 
-    def render(actual_context):
+    def render(actual_context, *, eligible_destinations):
         assert actual_context is context
+        assert eligible_destinations == ROUTER_DESTINATIONS
         clock.events.append("render")
         clock.advance(10)
         return "PRIVATE_RENDERED_PROMPT"
@@ -123,7 +125,7 @@ async def test_timer_surrounds_only_the_awaited_route_call(monkeypatch):
             return "policy"
 
     async def route(**kwargs):
-        assert kwargs == {"instructions": "PRIVATE_RENDERED_PROMPT", "user_message": "PRIVATE_CALLER"}
+        assert kwargs == {"instructions": "PRIVATE_RENDERED_PROMPT", "user_message": "PRIVATE_CALLER", "eligible_destinations": ROUTER_DESTINATIONS}
         clock.events.append("route_start")
         clock.advance(0.125)
         clock.events.append("route_end")
@@ -365,7 +367,8 @@ def test_both_backends_use_identical_case_order_separately_and_sequentially(monk
         assert model == "gpt-6-luna"
         durations = iter([0.1, 0.2] if backend == "responses" else [0.025, 0.025])
 
-        async def route(*, instructions, user_message):
+        async def route(*, instructions, user_message, eligible_destinations):
+            assert eligible_destinations == ROUTER_DESTINATIONS
             events.append((backend, user_message))
             cli_setup.clock.advance(next(durations))
             return SimpleNamespace(destination=destinations[user_message])

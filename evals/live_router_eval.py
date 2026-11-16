@@ -15,6 +15,7 @@ from openai import AsyncOpenAI, OpenAIError
 from app.agents.decisions_router import DECISIONS_ROUTER_MODEL
 from app.agents.prompt_context import PromptContext
 from app.agents.prompt_renderer import PromptRenderer
+from app.agents.router_destinations import ROUTER_DESTINATIONS
 from app.agents.router_factory import RouterBackend, create_router
 from evals.failure_attribution import (
     attribute_report_failures,
@@ -49,9 +50,9 @@ def create_live_route_case(
     timer = perf_counter if clock is None else clock
 
     async def route_case(context: PromptContext, user_message: str) -> str:
-        instructions = renderer.render_router(context)
+        instructions = renderer.render_router(context, eligible_destinations=ROUTER_DESTINATIONS)
         started = timer()
-        decision = await router.route(instructions=instructions, user_message=user_message)
+        decision = await router.route(instructions=instructions, user_message=user_message, eligible_destinations=ROUTER_DESTINATIONS)
         elapsed_ms = (timer() - started) * 1000
         if duration_samples is not None:
             duration_samples.append(elapsed_ms)

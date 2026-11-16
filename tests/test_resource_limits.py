@@ -26,6 +26,7 @@ from app.agents.responses_tool_loop import (
     run_agent_turn,
 )
 from app.agents.router_agent import OpenAIRouter, RouteDecision
+from app.agents.router_destinations import ROUTER_DESTINATIONS
 
 
 def function_call(arguments: str = "{}") -> SimpleNamespace:
@@ -73,7 +74,7 @@ async def test_oversized_caller_input_makes_no_model_or_handler_calls(boundary) 
 
     with pytest.raises(CallerMessageTooLargeError) as error:
         if boundary == "router":
-            await OpenAIRouter(client).route(instructions="Demo instructions.", user_message=rejected)
+            await OpenAIRouter(client).route(instructions="Demo instructions.", user_message=rejected, eligible_destinations=ROUTER_DESTINATIONS)
         else:
             await run_turn(client, handler, user_message=rejected)
 
@@ -91,7 +92,7 @@ async def test_caller_limit_counts_characters_and_accepts_exact_limit(boundary) 
     message = "🐕" * MAX_USER_MESSAGE_CHARS
 
     if boundary == "router":
-        await OpenAIRouter(client).route(instructions="Demo instructions.", user_message=message)
+        await OpenAIRouter(client).route(instructions="Demo instructions.", user_message=message, eligible_destinations=ROUTER_DESTINATIONS)
         assert client.responses.parse.await_args.kwargs["input"] == message
     else:
         assert await run_turn(client, AsyncMock(), user_message=message) == "Hello."
@@ -107,7 +108,7 @@ async def test_oversized_rendered_context_makes_no_model_calls(boundary) -> None
 
     with pytest.raises(InstructionsTooLargeError) as error:
         if boundary == "router":
-            await OpenAIRouter(client).route(instructions=instructions, user_message="Hello.")
+            await OpenAIRouter(client).route(instructions=instructions, user_message="Hello.", eligible_destinations=ROUTER_DESTINATIONS)
         else:
             await run_turn(client, AsyncMock(), instructions=instructions)
 

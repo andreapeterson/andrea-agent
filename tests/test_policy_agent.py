@@ -22,6 +22,7 @@ from app.agents import (
 )
 from app.agents.prompt_renderer import POLICY_PROMPT_VERSION, PromptRenderingError
 from app.agents.responses_tool_loop import ToolExecutionError
+from app.agents.router_destinations import ROUTER_DESTINATIONS
 from app.agents.router_handoff import SpecialistNotAvailableError, route_and_respond
 from app.agents.search_policy_tool import (
     SEARCH_POLICY_TOOL,
@@ -280,6 +281,7 @@ async def test_policy_routing_invokes_policy_agent_without_verification() -> Non
         renderer=PromptRenderer(),
         verification_agent=verification_agent,
         policy_agent=make_agent(retriever, policy_responses),
+        eligible_destinations=ROUTER_DESTINATIONS,
     )
 
     answer = await handle(context=PromptContext(customer_verified=False), user_message="What are your weekday hours?")
@@ -300,6 +302,7 @@ async def test_unfinished_destinations_still_raise_unavailable_error(destination
         renderer=PromptRenderer(),
         verification_agent=verification_agent,
         policy_agent=make_agent(FakeRetriever([]), responses),
+        eligible_destinations=ROUTER_DESTINATIONS,
     )
 
     with pytest.raises(SpecialistNotAvailableError, match=destination):

@@ -10,6 +10,7 @@ from app.agents import (
     PromptRenderer,
     PromptRenderingError,
 )
+from app.agents.router_destinations import ROUTER_DESTINATIONS
 from app.models.appointment import AppointmentSlot, AppointmentType
 from app.models.conversation import ConversationMessage, ConversationRole
 from app.models.routing import (
@@ -188,7 +189,8 @@ def test_agent_renderers_accept_only_saved_context(agent: str) -> None:
     context.recent_messages = [ConversationMessage(role=ConversationRole.USER, content=previous_message)]
     before = context.model_copy(deep=True)
 
-    prompt = getattr(PromptRenderer(), f"render_{agent}")(context)
+    options = {"eligible_destinations": ROUTER_DESTINATIONS} if agent == "router" else {}
+    prompt = getattr(PromptRenderer(), f"render_{agent}")(context, **options)
 
     assert f"user: {previous_message}" in prompt
     assert "Current caller message" not in prompt
@@ -200,4 +202,5 @@ def test_current_message_is_not_available_as_a_template_value(agent: str, tmp_pa
     (tmp_path / f"{agent}.md.j2").write_text("{{ user_message }}", encoding="utf-8")
 
     with pytest.raises(PromptRenderingError, match="Unable to render prompt version"):
-        getattr(PromptRenderer(template_directory=tmp_path), f"render_{agent}")(PromptContext())
+        options = {"eligible_destinations": ROUTER_DESTINATIONS} if agent == "router" else {}
+        getattr(PromptRenderer(template_directory=tmp_path), f"render_{agent}")(PromptContext(), **options)
