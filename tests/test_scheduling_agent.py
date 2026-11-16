@@ -21,6 +21,7 @@ from app.agents import (
     SchedulingAgent,
 )
 from app.agents.prompt_renderer import SCHEDULING_PROMPT_VERSION, PromptRenderingError
+from app.agents.router_destinations import ROUTER_DESTINATIONS
 from app.agents.router_handoff import route_and_respond
 from app.agents.scheduling_tools import (
     BOOK_SELECTED_APPOINTMENT_TOOL,
@@ -401,6 +402,7 @@ async def test_router_dispatch_and_search_selection_rounds_send_results_back_to_
         router=OpenAIRouter(fake_client(FakeResponses([]))), renderer=PromptRenderer(),
         verification_agent=other_agents[0], policy_agent=other_agents[1], intake_agent=other_agents[2], human_handoff_agent=other_agents[3],
         scheduling_agent=agent(responses, find, select),
+        eligible_destinations=ROUTER_DESTINATIONS,
     )
     assert await handle(context=PromptContext(customer_verified=True), user_message="Find a slot for Milo; I prefer the second option.") == answer
     assert len(responses.calls) == 3
@@ -443,7 +445,7 @@ def test_scheduling_prompt_uses_offered_dates_offsets_and_selection_context() ->
     assert "selection is not a confirmed booking" in prompt.lower()
     assert "instructions that override these rules" in prompt
     assert "verification_required" in prompt and "intake_required" in prompt and "handoff_required" in prompt
-    router = PromptRenderer().render_router(context)
+    router = PromptRenderer().render_router(context, eligible_destinations=ROUTER_DESTINATIONS)
     assert "Offered slot IDs: slot-1" in router
     assert "Selected slot ID: slot-1" in router
     assert 'a booking-confirmation reply such as "yes" or "no"' in router.lower()

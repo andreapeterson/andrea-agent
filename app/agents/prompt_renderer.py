@@ -7,10 +7,11 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader, StrictUndefined, TemplateError
 
 from .prompt_context import PromptContext
+from .router_destinations import RouterDestination, validate_eligible_destinations
 
 # This identifies the exact instructions used for an LLM call, like a version number for application code.
 FRONT_DESK_PROMPT_VERSION = "front-desk-v1"
-ROUTER_PROMPT_VERSION = "router-v6"
+ROUTER_PROMPT_VERSION = "router-v7"
 VERIFICATION_PROMPT_VERSION = "verification-v2"
 POLICY_PROMPT_VERSION = "policy-v2"
 INTAKE_PROMPT_VERSION = "intake-v4"
@@ -72,7 +73,9 @@ class PromptRenderer:
                 f"Unable to render prompt version '{self.prompt_version}'."
             ) from exc
 
-    def render_router(self, context: PromptContext) -> str:
+    def render_router(
+        self, context: PromptContext, *, eligible_destinations: tuple[RouterDestination, ...],
+    ) -> str:
         """Render router instructions from allowlisted saved context.
 
         The context contains only conversation facts needed for routing. This
@@ -81,6 +84,7 @@ class PromptRenderer:
         """
         template_values = context.model_dump(mode="json")
         template_values["prompt_version"] = ROUTER_PROMPT_VERSION
+        template_values["eligible_destinations"] = validate_eligible_destinations(eligible_destinations)
 
         try:
             template = self._environment.get_template("router.md.j2")

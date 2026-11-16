@@ -16,7 +16,7 @@ from app.agents.prompt_renderer import PromptRenderer
 from app.agents.record_intake_tool import create_record_intake_handler
 from app.agents.request_handoff_tool import create_request_handoff_handler
 from app.agents.resource_limits import MAX_RECENT_MESSAGES, validate_user_message_size
-from app.agents.router_agent import Router
+from app.agents.router_agent import Router, RouterDestination
 from app.agents.router_handoff import route_and_respond
 from app.agents.scheduling_agent import SchedulingAgent
 from app.agents.scheduling_tools import (
@@ -24,6 +24,7 @@ from app.agents.scheduling_tools import (
     create_find_appointment_slots_handler,
     create_select_appointment_slot_handler,
 )
+from app.agents.specialist_eligibility import eligible_specialists
 from app.agents.verification_agent import VerificationAgent
 from app.agents.workflow_observation import WorkflowObserver, observe_turn
 from app.integrations import HandoffClient, LegacyCRMClient, SchedulerClient
@@ -99,6 +100,67 @@ class PromptAgentRuntime:
             recent_messages=state.messages[-MAX_RECENT_MESSAGES:],
         ).model_copy(deep=True) #create a deep copy to prevent accidental mutation of the original state, describes state before the turn, so that the model can make decisions based on the state before the turn
 
+    def _build_specialist(
+        self, destination: RouterDestination, state: ConversationState,
+    ) -> VerificationAgent | IntakeAgent | PolicyAgent | HumanHandoffAgent | SchedulingAgent | None:
+        """Prepare only the selected specialist, after trusted eligibility validation."""
+        if destination == "verification":
+            return VerificationAgent(
+                client=self._openai_client,
+                model=self._specialist_model,
+                prompt_renderer=self._prompt_renderer,
+                lookup_customer_handler=create_lookup_customer_handler(
+                    self._legacy_crm_client,
+                    conversation_state=state,
+                    conversation_store=self._conversation_store,
+                ),
+            )
+        if destination == "policy":
+            return self._policy_agent
+        if destination in {"intake", "human_handoff"}:
+            handoff_handler = create_request_handoff_handler(
+                self._handoff_client,
+                conversation_state=state,
+                conversation_store=self._conversation_store,
+            )
+            if destination == "human_handoff":
+                return HumanHandoffAgent(
+                    client=self._openai_client,
+                    model=self._specialist_model,
+                    prompt_renderer=self._prompt_renderer,
+                    request_handoff_handler=handoff_handler,
+                )
+            return IntakeAgent(
+                client=self._openai_client,
+                model=self._specialist_model,
+                prompt_renderer=self._prompt_renderer,
+                record_intake_handler=create_record_intake_handler(
+                    conversation_state=state,
+                    conversation_store=self._conversation_store,
+                ),
+                request_handoff_handler=handoff_handler,
+            )
+        return SchedulingAgent(
+            client=self._openai_client,
+            model=self._specialist_model,
+            prompt_renderer=self._prompt_renderer,
+            find_appointment_slots_handler=create_find_appointment_slots_handler(
+                self._scheduler_client,
+                conversation_state=state,
+                conversation_store=self._conversation_store,
+            ),
+            select_appointment_slot_handler=create_select_appointment_slot_handler(
+                conversation_state=state,
+                conversation_store=self._conversation_store,
+            ),
+            book_selected_appointment_handler=create_book_selected_appointment_handler(
+                self._scheduler_client,
+                conversation_state=state,
+                conversation_store=self._conversation_store,
+                idempotency_key_factory=self._idempotency_key_factory,
+            ),
+        )
+
     async def start_conversation(self, conversation_id: str) -> AgentTurnResult:
         if not isinstance(conversation_id, str) or not conversation_id.strip():
             raise ValueError("conversation_id must be a nonblank string.")
@@ -137,70 +199,13 @@ class PromptAgentRuntime:
                     )
                     return AgentTurnResult(state=state, assistant_message=message)
 
+                eligible_destinations = eligible_specialists(state)
                 context = self._build_prompt_context(state)
-                # All handlers share this state; service-backed tools also receive their service client.
-                lookup_handler = create_lookup_customer_handler(
-                    self._legacy_crm_client,
-                    conversation_state=state,
-                    conversation_store=self._conversation_store,
-                )
-                intake_handler = create_record_intake_handler(
-                    conversation_state=state,
-                    conversation_store=self._conversation_store,
-                )
-                handoff_handler = create_request_handoff_handler(
-                    self._handoff_client,
-                    conversation_state=state,
-                    conversation_store=self._conversation_store,
-                )
-                find_slots_handler = create_find_appointment_slots_handler(
-                    self._scheduler_client,
-                    conversation_state=state,
-                    conversation_store=self._conversation_store,
-                )
-                select_slot_handler = create_select_appointment_slot_handler(
-                    conversation_state=state,
-                    conversation_store=self._conversation_store,
-                )
-                booking_handler = create_book_selected_appointment_handler(
-                    self._scheduler_client,
-                    conversation_state=state,
-                    conversation_store=self._conversation_store,
-                    idempotency_key_factory=self._idempotency_key_factory,
-                )
-
-                # Agents configure model calls. Tool definitions go to the model; handlers run in Python.
-                handle = route_and_respond( #configured function that knows which router and specialists to call based on the current conversation state and user message
+                handle = route_and_respond(
                     router=self._router,
                     renderer=self._prompt_renderer,
-                    verification_agent=VerificationAgent(
-                        client=self._openai_client,
-                        model=self._specialist_model,
-                        prompt_renderer=self._prompt_renderer,
-                        lookup_customer_handler=lookup_handler,
-                    ),
-                    intake_agent=IntakeAgent(
-                        client=self._openai_client,
-                        model=self._specialist_model,
-                        prompt_renderer=self._prompt_renderer,
-                        record_intake_handler=intake_handler,
-                        request_handoff_handler=handoff_handler,
-                    ),
-                    human_handoff_agent=HumanHandoffAgent(
-                        client=self._openai_client,
-                        model=self._specialist_model,
-                        prompt_renderer=self._prompt_renderer,
-                        request_handoff_handler=handoff_handler,
-                    ),
-                    scheduling_agent=SchedulingAgent(
-                        client=self._openai_client,
-                        model=self._specialist_model,
-                        prompt_renderer=self._prompt_renderer,
-                        find_appointment_slots_handler=find_slots_handler,
-                        select_appointment_slot_handler=select_slot_handler,
-                        book_selected_appointment_handler=booking_handler,
-                    ),
-                    policy_agent=self._policy_agent,
+                    eligible_destinations=eligible_destinations,
+                    specialist_factory=lambda destination: self._build_specialist(destination, state),
                 )
                 # On an error, do not overwrite important state already saved by a tool.
                 assistant_message = await handle(context=context, user_message=user_message)

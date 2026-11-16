@@ -99,6 +99,12 @@ def customer() -> Customer:
     )
 
 
+def prepare_scheduling_state(state) -> None:
+    state.verified_customer = customer()
+    state.original_concern = "Milo needs a routine visit."
+    state.intake_answers = IntakeAnswers(**{name: False for name in IntakeAnswers.model_fields})
+
+
 def slot() -> AppointmentSlot:
     start = datetime(2026, 10, 20, 9, tzinfo=UTC)
     return AppointmentSlot(slot_id="slot-1", clinic_id="clinic-1", starts_at=start, ends_at=start + timedelta(minutes=30), appointment_type=AppointmentType.ROUTINE)
@@ -162,6 +168,10 @@ async def test_start_creates_verifying_state_and_saves_greeting_without_openai(r
 async def test_one_turn_routes_to_exactly_one_specialist_and_saves_ordered_history(runtime_setup, destination, tools) -> None:
     setup = runtime_setup
     started = await setup.runtime.start_conversation("conv-one")
+    if destination == "scheduling":
+        state = setup.store.get("conv-one")
+        prepare_scheduling_state(state)
+        setup.store.save(state)
     setup.responses.destination = destination
 
     result = await setup.runtime.handle_turn("conv-one", "  Hello  ")
@@ -186,7 +196,10 @@ async def test_one_turn_routes_to_exactly_one_specialist_and_saves_ordered_histo
 
 
 @pytest.mark.asyncio
-async def test_router_and_runtime_configured_specialists_share_injected_openai_client(runtime_setup, monkeypatch) -> None:
+@pytest.mark.parametrize("destination, selected", [
+    ("verification", 0), ("intake", 1), ("human_handoff", 2), ("scheduling", 3),
+])
+async def test_router_and_runtime_configured_specialists_share_injected_openai_client(runtime_setup, monkeypatch, destination, selected) -> None:
     setup = runtime_setup
     constructors = []
     for name in ("VerificationAgent", "IntakeAgent", "HumanHandoffAgent", "SchedulingAgent"):
@@ -195,13 +208,21 @@ async def test_router_and_runtime_configured_specialists_share_injected_openai_c
         constructors.append(constructor)
 
     await setup.runtime.start_conversation("conv-shared-client")
+    setup.responses.destination = destination
+    if destination == "scheduling":
+        state = setup.store.get("conv-shared-client")
+        prepare_scheduling_state(state)
+        setup.store.save(state)
     await setup.runtime.handle_turn("conv-shared-client", "Hello")
 
     assert setup.runtime._openai_client is setup.client
     assert setup.runtime._router._client is setup.client
-    for constructor in constructors:
-        constructor.assert_called_once()
-        assert constructor.call_args.kwargs["client"] is setup.client
+    for index, constructor in enumerate(constructors):
+        if index == selected:
+            constructor.assert_called_once()
+            assert constructor.call_args.kwargs["client"] is setup.client
+        else:
+            constructor.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -209,6 +230,8 @@ async def test_router_and_runtime_configured_specialists_share_injected_openai_c
 async def test_current_caller_injection_is_only_in_input_until_turn_succeeds(runtime_setup, destination) -> None:
     setup = runtime_setup
     state = setup.store.create("conv-input-separation")
+    if destination == "scheduling":
+        prepare_scheduling_state(state)
     previous = "Previously saved conversation message."
     state.messages = [ConversationMessage(role=ConversationRole.USER, content=previous)]
     setup.store.save(state)
@@ -312,6 +335,7 @@ async def test_lookup_tool_mutation_survives_runtime_final_save_and_next_turn_co
     assert result.state.verified_customer == customer()
     assert result.state.turn_count == 1
     assert setup.store.get("conv-lookup").verified_customer == customer()
+    setup.responses.destination = "intake"
     await setup.runtime.handle_turn("conv-lookup", "Which pet is on my account?")
     assert "Customer first name: Avery" in setup.responses.parse_calls[-1]["instructions"]
     assert "Known pets: Milo" in setup.responses.parse_calls[-1]["instructions"]
@@ -349,6 +373,7 @@ async def test_intake_and_handoff_handlers_use_same_loaded_state_and_save_update
 async def test_scheduling_destination_executes_prepared_search_selection_and_booking(runtime_setup) -> None:
     setup = runtime_setup
     state = setup.store.create("conv-booking")
+    state.original_concern = "Milo needs a routine visit."
     state.verified_customer = customer()
     state.intake_answers = IntakeAnswers(**{name: False for name in IntakeAnswers.model_fields})
     setup.store.save(state)
@@ -519,6 +544,7 @@ async def test_router_error_does_not_expose_original_error_text(runtime_setup) -
 async def test_later_model_failure_does_not_undo_state_saved_by_booking_tool(runtime_setup, booking_succeeded) -> None:
     setup = runtime_setup
     state = setup.store.create("conv-partial")
+    state.original_concern = "Milo needs a routine visit."
     state.verified_customer = customer()
     state.intake_answers = IntakeAnswers(**{name: False for name in IntakeAnswers.model_fields})
     state.selected_pet_id = "private-pet-id"

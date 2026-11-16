@@ -3,15 +3,20 @@
 from __future__ import annotations
 
 import inspect
+from functools import lru_cache
 from typing import Literal, Protocol
 
 from openai import AsyncOpenAI
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, create_model
 
 from app.agents.prompt_renderer import ROUTER_PROMPT_VERSION
 from app.agents.resource_limits import (
     validate_instructions_size,
     validate_user_message_size,
+)
+from app.agents.router_destinations import (
+    RouterDestination,
+    validate_eligible_destinations,
 )
 from app.agents.workflow_observation import observe_model_request
 
@@ -22,9 +27,6 @@ class RouterRequestError(RuntimeError):
 
 class RouterResponseError(RuntimeError):
     """Raised when the router response is missing or cannot be validated."""
-
-
-RouterDestination = Literal["verification", "intake", "policy", "scheduling", "human_handoff"]
 
 
 class RouteDecision(BaseModel):
@@ -42,10 +44,26 @@ class RouteDecision(BaseModel):
     reason: str = Field(..., min_length=1)
 
 
+@lru_cache(maxsize=31)
+def restricted_route_decision(
+    eligible_destinations: tuple[RouterDestination, ...],
+) -> type[RouteDecision]:
+    """Constrain structured output itself, using a small cached model per choice set."""
+    choices = validate_eligible_destinations(eligible_destinations)
+    return create_model(
+        "EligibleRouteDecision",
+        __base__=RouteDecision,
+        destination=(Literal[choices], ...),
+    )
+
+
 class Router(Protocol):
     """Shared contract for routing without executing a specialist or tool."""
 
-    async def route(self, *, instructions: str, user_message: str) -> RouteDecision: ...
+    async def route(
+        self, *, instructions: str, user_message: str,
+        eligible_destinations: tuple[RouterDestination, ...],
+    ) -> RouteDecision: ...
 
 
 class OpenAIRouter:
@@ -61,6 +79,7 @@ class OpenAIRouter:
         *,
         instructions: str,
         user_message: str,
+        eligible_destinations: tuple[RouterDestination, ...],
     ) -> RouteDecision:
         """Return the single specialist destination chosen for the caller message.
 
@@ -74,6 +93,8 @@ class OpenAIRouter:
             raise RouterRequestError("User message cannot be blank.")
         validate_user_message_size(user_message)
         validate_instructions_size(instructions)
+        choices = validate_eligible_destinations(eligible_destinations)
+        response_model = restricted_route_decision(choices)
 
         try:
             with observe_model_request(self._model, prompt_version=ROUTER_PROMPT_VERSION) as record_usage:
@@ -81,7 +102,7 @@ class OpenAIRouter:
                     model=self._model,
                     input=user_message,
                     instructions=instructions,
-                    text_format=RouteDecision, #structure the response like the Pydantic RouteDecision model.
+                    text_format=response_model,
                 )
                 if inspect.isawaitable(parse_result):
                     response = await parse_result
@@ -102,7 +123,8 @@ class OpenAIRouter:
                 payload_data = parsed
             else:
                 payload_data = getattr(parsed, "__dict__", {}) #fallback to __dict__ if available, otherwise empty dict
-            return RouteDecision.model_validate(payload_data)
+            validated = response_model.model_validate(payload_data)
+            return RouteDecision(destination=validated.destination, reason=validated.reason)
         except Exception as exc:
             raise RouterResponseError("Router response was malformed.") from exc
 

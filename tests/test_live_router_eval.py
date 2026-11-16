@@ -19,6 +19,7 @@ from app.agents.policy_agent import PolicyAgent
 from app.agents.prompt_context import PromptContext
 from app.agents.prompt_renderer import PromptRenderer
 from app.agents.router_agent import OpenAIRouter, RouteDecision
+from app.agents.router_destinations import ROUTER_DESTINATIONS
 from app.agents.scheduling_agent import SchedulingAgent
 from app.agents.verification_agent import VerificationAgent
 from app.integrations import HandoffClient, LegacyCRMClient, SchedulerClient
@@ -128,13 +129,14 @@ async def test_adapter_reuses_one_router_and_client_renders_real_prompt_and_retu
     constructor.assert_called_once_with(client, model="configured-router-model")
     assert len(client.responses.calls) == 2
     request = client.responses.calls[0]
-    assert request["instructions"] == renderer.render_router(context)
+    assert request["instructions"] == renderer.render_router(context, eligible_destinations=ROUTER_DESTINATIONS)
     assert "Prompt version:" in request["instructions"]
     assert "user: Previously saved caller text." in request["instructions"]
     assert caller not in request["instructions"]
     assert request["input"] == caller
     assert request["model"] == "configured-router-model"
-    assert request["text_format"] is RouteDecision
+    assert issubclass(request["text_format"], RouteDecision)
+    assert request["text_format"].model_json_schema()["properties"]["destination"]["enum"] == list(ROUTER_DESTINATIONS)
     assert all(call["model"] == "configured-router-model" for call in client.responses.calls)
     assert context == before
 

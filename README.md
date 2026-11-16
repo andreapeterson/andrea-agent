@@ -231,6 +231,53 @@ The Router and runtime-configured specialists share one OpenAI client. The prepa
 Policy Agent keeps its existing retrieval dependencies. Tests use fake model and
 service clients without making external API calls.
 
+## Eligibility-gated Subtask routing (7H1)
+
+Each caller turn follows:
+
+`ConversationState → Python eligibility → Router → selected specialist → caller`
+
+Layer 1 is a small, in-process Python check, normally sub-millisecond work,
+with no network or model call. It uses trusted state and the existing
+`assess_routing()` function; it does not interpret caller intent. Its ordered,
+immutable destination tuple is passed explicitly to Router rendering and routing.
+Missing eligibility never defaults to all specialists in production.
+
+| Trusted state | Eligible destinations |
+| --- | --- |
+| Terminal phase: booking complete, handoff complete, or completed | None; return the existing terminal response without routing. |
+| Recorded intake reassesses as urgent | Human Handoff only. |
+| Normal, without a CRM customer object | Verification, Intake, Policy, Human Handoff. |
+| CRM customer exists; intake or concern is incomplete | Intake, Policy, Human Handoff. |
+| CRM customer, nonblank original concern, complete routine/same-day intake, no booking or handoff receipt | Intake, Policy, Scheduling, Human Handoff. |
+
+A stored customer ID or text claiming verification does not replace the CRM
+customer object. Eligibility recomputes the deterministic assessment from
+recorded intake answers rather than trusting a stale cached routing decision.
+Scheduling does not require a selected pet: its specialist handles clarification.
+Pending booking keys remain untouched, and scheduling stays available when its
+other prerequisites hold so the existing handler can recover an uncertain booking.
+Intake remains available after non-urgent assessment for new or worsening concerns.
+
+Layer 2 uses the model to interpret ambiguous caller language, mixed natural
+phrasing, and intent, then choose among the allowed specialists. Responses uses
+a Pydantic destination Literal restricted to the current choices; Decisions
+receives only those choices and validates its returned confidence/probabilities.
+Both validate the destination again. Dispatch also rejects an ineligible result
+before constructing any specialist or business handler, without silently choosing
+another specialist. The selected specialist answers the caller directly.
+
+Python continues to enforce authentication, urgent-state priority, explicit
+caller confirmation, booking idempotency, accepted handoff receipts, and terminal
+workflow states. Eligibility adds a first layer; existing specialist tools retain
+their independent deterministic guards. Model prompts alone cannot enforce these
+state restrictions, and eligibility alone cannot prove correct intent selection,
+symptom extraction, caller-confirmation extraction, or response grounding.
+
+There is no Manager Agent, synthesis call, or additional model request.
+Both existing backends remain available through `PAWLINE_ROUTER_BACKEND=responses`
+(the default) or `PAWLINE_ROUTER_BACKEND=decisions`. Restart after changing it.
+
 ## Part 6A: conversation memory foundation
 
 PawLine now includes a minimal internal conversation-memory model for future multi-turn agent work.

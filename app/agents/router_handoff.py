@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+
 from app.agents.human_handoff_agent import HumanHandoffAgent
 from app.agents.intake_agent import IntakeAgent
 from app.agents.policy_agent import PolicyAgent
@@ -14,7 +16,8 @@ from app.agents.prompt_renderer import (
     VERIFICATION_PROMPT_VERSION,
     PromptRenderer,
 )
-from app.agents.router_agent import Router
+from app.agents.router_agent import Router, RouterDestination, RouterResponseError
+from app.agents.router_destinations import validate_eligible_destinations
 from app.agents.scheduling_agent import SchedulingAgent
 from app.agents.verification_agent import VerificationAgent
 from app.agents.workflow_observation import observe_specialist
@@ -36,11 +39,16 @@ def route_and_respond(
     *,
     router: Router,
     renderer: PromptRenderer,
-    verification_agent: VerificationAgent,
+    eligible_destinations: tuple[RouterDestination, ...],
+    verification_agent: VerificationAgent | None = None,
     policy_agent: PolicyAgent | None = None,
     intake_agent: IntakeAgent | None = None,
     human_handoff_agent: HumanHandoffAgent | None = None,
     scheduling_agent: SchedulingAgent | None = None,
+    specialist_factory: Callable[
+        [RouterDestination],
+        VerificationAgent | PolicyAgent | IntakeAgent | HumanHandoffAgent | SchedulingAgent | None,
+    ] | None = None,
 ) -> object:
     """Render the router prompt, route the message, and call the implemented specialist.
 
@@ -48,45 +56,31 @@ def route_and_respond(
     are supported. An unsupplied specialist remains unavailable.
     """
 
+    choices = validate_eligible_destinations(eligible_destinations)
+
     async def handle(context: PromptContext, user_message: str) -> str:
-        instructions = renderer.render_router(context)
+        instructions = renderer.render_router(context, eligible_destinations=choices)
         decision = await router.route(
             instructions=instructions,
             user_message=user_message,
+            eligible_destinations=choices,
         )
+        if decision.destination not in choices:
+            raise RouterResponseError("Router selected an ineligible specialist.")
         observe_specialist(
             decision.destination, prompt_version=SPECIALIST_PROMPT_VERSIONS.get(decision.destination),
         )
 
-        if decision.destination == "verification":
-            return await verification_agent.respond(
-                context=context,
-                user_message=user_message,
-            )
-
-        if decision.destination == "policy" and policy_agent is not None:
-            return await policy_agent.respond(
-                context=context,
-                user_message=user_message,
-            )
-
-        if decision.destination == "intake" and intake_agent is not None:
-            return await intake_agent.respond(
-                context=context,
-                user_message=user_message,
-            )
-
-        if decision.destination == "human_handoff" and human_handoff_agent is not None:
-            return await human_handoff_agent.respond(
-                context=context,
-                user_message=user_message,
-            )
-
-        if decision.destination == "scheduling" and scheduling_agent is not None:
-            return await scheduling_agent.respond(
-                context=context,
-                user_message=user_message,
-            )
+        # Build handlers only after validation, including when the Router is faulty.
+        agent = specialist_factory(decision.destination) if specialist_factory else {
+            "verification": verification_agent,
+            "intake": intake_agent,
+            "policy": policy_agent,
+            "scheduling": scheduling_agent,
+            "human_handoff": human_handoff_agent,
+        }.get(decision.destination)
+        if agent is not None:
+            return await agent.respond(context=context, user_message=user_message)
 
         raise SpecialistNotAvailableError(
             f"The specialist '{decision.destination}' is not available."

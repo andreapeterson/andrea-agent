@@ -81,7 +81,7 @@ fake OpenAI clients only; running pytest does not opt into a paid evaluation.
 ### Responses and Decisions Router comparison (7G1)
 
 Both implementations satisfy the same `Router.route(instructions=...,
-user_message=...)` contract. The production dependency layer selects one Router
+user_message=..., eligible_destinations=...)` contract. The production dependency layer selects one Router
 and injects it into `PromptAgentRuntime`; the runtime does not choose a backend
 on each turn. Configure `PAWLINE_ROUTER_BACKEND=responses` (the default) or
 `PAWLINE_ROUTER_BACKEND=decisions`, then restart the application. Unknown values
@@ -135,6 +135,40 @@ These commands incur API cost and are never run automatically by tests or CI.
 Routing accuracy must be measured on PawLine's labeled cases before changing
 the production default. Fake-client tests verify contracts, validation, wiring,
 and shared scoring; they do not establish live accuracy or injection resistance.
+
+### Eligibility-gated routing (7H1)
+
+The production runtime now supplies exact, deterministic choices derived from
+trusted `ConversationState` before either backend routes. Responses constrains
+its structured destination schema; Decisions constrains its options. Dispatch
+checks membership before constructing a specialist handler. Existing business
+tool guards remain unchanged, and no Manager or additional model call is added.
+
+Standalone Router cases contain `PromptContext`, not complete trusted runtime
+state. The live Router adapter therefore explicitly supplies all five destinations
+to preserve this isolated intent-selection baseline; it does not infer CRM
+verification from caller text or expected labels. These Router runs do **not**
+evaluate the production eligibility gate. The existing conversation dataset and
+controlled runtime tests exercise state transitions and eligibility together.
+JSONL labels and deterministic scoring are unchanged. An ineligible Router result
+aborts a conversation evaluation; incomplete turns are not scored as successful
+completed workflows. Fake-client tests establish these Python contracts, not real
+model routing accuracy or prompt-injection resistance.
+
+Optional paid runs (never run automatically; live eval CLIs still use their
+existing environment credential setup):
+
+```bash
+uv run python -m evals.live_router_eval --confirm-live --router-backend responses --case-id policy_clinic_hours_unverified
+uv run python -m evals.live_router_eval --confirm-live --router-backend decisions --case-id policy_clinic_hours_unverified
+uv run python -m evals.live_conversation_eval --confirm-live --case-id verified_urgent_intake_handoff
+uv run python -m evals.live_conversation_eval --confirm-live --case-id verified_routine_booking
+```
+
+The conversation live adapter uses controlled demo integrations. One Router
+selection is still followed by the selected specialist's own model/tool loop;
+there is no Manager synthesis step. Neither timing nor a passing mocked test
+establishes clinical validity or guarantees extraction of caller intent/facts.
 
 ### Per-request Router latency benchmark (7G2)
 

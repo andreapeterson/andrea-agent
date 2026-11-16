@@ -34,6 +34,7 @@ from app.agents.request_handoff_tool import (
     RequestHandoffArguments,
     create_request_handoff_handler,
 )
+from app.agents.router_destinations import ROUTER_DESTINATIONS
 from app.agents.router_handoff import SpecialistNotAvailableError, route_and_respond
 from app.integrations.handoff_client import (
     HandoffClient,
@@ -312,6 +313,7 @@ async def test_routing_to_human_agent_without_a_tool_call_does_not_queue_handoff
     handle = route_and_respond(
         router=OpenAIRouter(fake_client(FakeResponses([]))), renderer=PromptRenderer(),
         verification_agent=verification_agent, human_handoff_agent=human_agent,
+        eligible_destinations=ROUTER_DESTINATIONS,
     )
 
     answer = await handle(context=PromptContext(customer_verified=False), user_message="Can you prepare and file my personal tax return?")
@@ -345,6 +347,7 @@ async def test_router_dispatches_to_human_agent_and_returns_actual_handoff_resul
         verification_agent=verification_agent,
         policy_agent=policy_agent,
         human_handoff_agent=human_agent,
+        eligible_destinations=ROUTER_DESTINATIONS,
     )
 
     answer = await handle(context=PromptContext(customer_verified=False), user_message="I want to speak with a person.")
@@ -462,9 +465,9 @@ def test_handoff_prompt_and_known_urgent_router_priority() -> None:
     assert "queued request for human assistance" in prompt
     assert "Never claim a live connection" in prompt
     assert "Provide no diagnosis or treatment recommendation" in prompt
-    router = PromptRenderer().render_router(context)
+    router = PromptRenderer().render_router(context, eligible_destinations=ROUTER_DESTINATIONS)
     assert "Known routing result: urgent / create_handoff" in router
-    assert "choose human_handoff before scheduling" in router
+    assert "Eligibility was already determined by trusted application state" in router
     intake = PromptRenderer().render_intake(context)
     assert "call request_handoff with reason urgent_intake" in intake
     assert "stop the routine questionnaire" in intake
@@ -496,7 +499,7 @@ async def test_scheduling_remains_unavailable_with_human_handoff_agent_supplied(
         async def route(self, **kwargs):
             return RouteDecision(destination="scheduling", reason="Caller requests a booking.")
     human_agent = Mock()
-    handle = route_and_respond(router=SchedulingRouter(), renderer=PromptRenderer(), verification_agent=Mock(), human_handoff_agent=human_agent)
+    handle = route_and_respond(router=SchedulingRouter(), renderer=PromptRenderer(), verification_agent=Mock(), human_handoff_agent=human_agent, eligible_destinations=ROUTER_DESTINATIONS)
     with pytest.raises(SpecialistNotAvailableError, match="scheduling"):
         await handle(context=PromptContext(customer_verified=True), user_message="Book an appointment.")
     human_agent.respond.assert_not_called()
